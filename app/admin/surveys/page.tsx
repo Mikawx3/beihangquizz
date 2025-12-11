@@ -12,6 +12,7 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
+import Modal from '@/app/components/Modal';
 
 interface Question {
   id: string;
@@ -24,6 +25,41 @@ export default function SurveysList() {
   const router = useRouter();
   const [surveys, setSurveys] = useState<any[]>([]);
   const [newSurveyName, setNewSurveyName] = useState('');
+  
+  // États pour les modals
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean;
+    type: 'alert' | 'confirm';
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+  }>({
+    isOpen: false,
+    type: 'alert',
+    title: '',
+    message: '',
+  });
+
+  // Fonction helper pour afficher une alerte
+  const showAlert = (title: string, message: string) => {
+    setModalState({
+      isOpen: true,
+      type: 'alert',
+      title,
+      message,
+    });
+  };
+
+  // Fonction helper pour afficher une confirmation
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setModalState({
+      isOpen: true,
+      type: 'confirm',
+      title,
+      message,
+      onConfirm,
+    });
+  };
 
   // Charger tous les sondages
   const loadSurveys = useCallback(async () => {
@@ -47,7 +83,7 @@ export default function SurveysList() {
   // Créer un nouveau sondage
   const handleCreateSurvey = async () => {
     if (!newSurveyName.trim()) {
-      alert('Veuillez entrer un nom pour le sondage');
+      showAlert('Erreur', 'Veuillez entrer un nom pour le sondage');
       return;
     }
 
@@ -63,7 +99,7 @@ export default function SurveysList() {
       router.push(`/admin/surveys/${surveyId}`);
     } catch (error) {
       console.error('Erreur lors de la création:', error);
-      alert('Erreur lors de la création du sondage');
+      showAlert('Erreur', 'Erreur lors de la création du sondage');
     }
   };
 
@@ -71,77 +107,79 @@ export default function SurveysList() {
   const handleDeleteSurvey = async (surveyId: string) => {
     if (!surveyId || surveyId.trim() === '') {
       console.error('❌ ID de sondage invalide:', surveyId);
-      alert('Erreur: ID de sondage invalide');
+      showAlert('Erreur', 'Erreur: ID de sondage invalide');
       return;
     }
 
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce sondage ? Cette action supprimera également toutes les questions associées.')) {
-      return;
-    }
-
-    try {
-      console.log('🗑️ Début de la suppression du sondage:', surveyId);
-      
-      // Vérifier que le sondage existe d'abord
-      const surveyRef = doc(db, 'surveys', surveyId);
-      const surveyDoc = await getDoc(surveyRef);
-      
-      if (!surveyDoc.exists()) {
-        alert('Ce sondage n\'existe pas ou a déjà été supprimé.');
-        await loadSurveys();
-        return;
-      }
-      
-      console.log('✅ Sondage trouvé:', surveyDoc.data());
-      
-      // D'abord, supprimer toutes les questions du sondage
-      const questionsRef = collection(db, 'surveys', surveyId, 'questions');
-      const questionsSnapshot = await getDocs(questionsRef);
-      
-      console.log(`📋 Trouvé ${questionsSnapshot.size} question(s) à supprimer`);
-      
-      if (questionsSnapshot.size > 0) {
-        const deletePromises = questionsSnapshot.docs.map(async (questionDoc) => {
-          try {
-            const questionRef = doc(db, 'surveys', surveyId, 'questions', questionDoc.id);
-            console.log(`🗑️ Tentative de suppression de la question: ${questionDoc.id}`);
-            await deleteDoc(questionRef);
-            console.log(`✅ Question supprimée: ${questionDoc.id}`);
-          } catch (questionError: any) {
-            console.error(`❌ Erreur lors de la suppression de la question ${questionDoc.id}:`, questionError);
-            throw new Error(`Erreur lors de la suppression de la question ${questionDoc.id}: ${questionError?.message || questionError?.code || 'Erreur inconnue'}`);
+    showConfirm(
+      'Confirmer la suppression',
+      'Êtes-vous sûr de vouloir supprimer ce sondage ? Cette action supprimera également toutes les questions associées.',
+      async () => {
+        try {
+          console.log('🗑️ Début de la suppression du sondage:', surveyId);
+          
+          // Vérifier que le sondage existe d'abord
+          const surveyRef = doc(db, 'surveys', surveyId);
+          const surveyDoc = await getDoc(surveyRef);
+          
+          if (!surveyDoc.exists()) {
+            showAlert('Erreur', 'Ce sondage n\'existe pas ou a déjà été supprimé.');
+            await loadSurveys();
+            return;
           }
-        });
-        
-        await Promise.all(deletePromises);
-        console.log('✅ Toutes les questions ont été supprimées');
-      } else {
-        console.log('ℹ️ Aucune question à supprimer');
+          
+          console.log('✅ Sondage trouvé:', surveyDoc.data());
+          
+          // D'abord, supprimer toutes les questions du sondage
+          const questionsRef = collection(db, 'surveys', surveyId, 'questions');
+          const questionsSnapshot = await getDocs(questionsRef);
+          
+          console.log(`📋 Trouvé ${questionsSnapshot.size} question(s) à supprimer`);
+          
+          if (questionsSnapshot.size > 0) {
+            const deletePromises = questionsSnapshot.docs.map(async (questionDoc) => {
+              try {
+                const questionRef = doc(db, 'surveys', surveyId, 'questions', questionDoc.id);
+                console.log(`🗑️ Tentative de suppression de la question: ${questionDoc.id}`);
+                await deleteDoc(questionRef);
+                console.log(`✅ Question supprimée: ${questionDoc.id}`);
+              } catch (questionError: any) {
+                console.error(`❌ Erreur lors de la suppression de la question ${questionDoc.id}:`, questionError);
+                throw new Error(`Erreur lors de la suppression de la question ${questionDoc.id}: ${questionError?.message || questionError?.code || 'Erreur inconnue'}`);
+              }
+            });
+            
+            await Promise.all(deletePromises);
+            console.log('✅ Toutes les questions ont été supprimées');
+          } else {
+            console.log('ℹ️ Aucune question à supprimer');
+          }
+          
+          // Ensuite, supprimer le sondage lui-même
+          console.log('🗑️ Tentative de suppression du sondage:', surveyId);
+          await deleteDoc(surveyRef);
+          console.log('✅ Sondage supprimé avec succès');
+          
+          // Recharger la liste
+          await loadSurveys();
+          showAlert('Succès', 'Sondage supprimé avec succès');
+        } catch (error: any) {
+          console.error('❌ Erreur complète lors de la suppression:', error);
+          console.error('❌ Code d\'erreur:', error?.code);
+          console.error('❌ Message d\'erreur:', error?.message);
+          console.error('❌ Stack:', error?.stack);
+          
+          if (error?.code === 'permission-denied') {
+            showAlert('Erreur', '❌ Erreur de permissions Firebase.\n\nVérifiez que les règles Firestore sont bien déployées:\n\nmatch /surveys/{surveyId} {\n  allow read, write: if true;\n  match /questions/{questionId} {\n    allow read, write: if true;\n  }\n}\n\nOuvrez la console (F12) pour plus de détails.');
+          } else if (error?.code === 'not-found') {
+            showAlert('Erreur', 'Le sondage n\'existe pas ou a déjà été supprimé.');
+            await loadSurveys();
+          } else {
+            showAlert('Erreur', 'Erreur lors de la suppression:\n\n' + (error?.message || error?.code || 'Erreur inconnue') + '\n\nOuvrez la console (F12) pour plus de détails.');
+          }
+        }
       }
-      
-      // Ensuite, supprimer le sondage lui-même
-      console.log('🗑️ Tentative de suppression du sondage:', surveyId);
-      await deleteDoc(surveyRef);
-      console.log('✅ Sondage supprimé avec succès');
-      
-      // Recharger la liste
-      await loadSurveys();
-      alert('Sondage supprimé avec succès');
-    } catch (error: any) {
-      console.error('❌ Erreur complète lors de la suppression:', error);
-      console.error('❌ Code d\'erreur:', error?.code);
-      console.error('❌ Message d\'erreur:', error?.message);
-      console.error('❌ Stack:', error?.stack);
-      
-      if (error?.code === 'permission-denied') {
-        alert('❌ Erreur de permissions Firebase.\n\nVérifiez que les règles Firestore sont bien déployées:\n\nmatch /surveys/{surveyId} {\n  allow read, write: if true;\n  match /questions/{questionId} {\n    allow read, write: if true;\n  }\n}\n\nOuvrez la console (F12) pour plus de détails.');
-      } else if (error?.code === 'not-found') {
-        alert('Le sondage n\'existe pas ou a déjà été supprimé.');
-        await loadSurveys();
-      } else {
-        alert('Erreur lors de la suppression:\n\n' + (error?.message || error?.code || 'Erreur inconnue') + '\n\nOuvrez la console (F12) pour plus de détails.');
-      }
-    }
+    );
   };
 
   return (
@@ -302,6 +340,16 @@ export default function SurveysList() {
           )}
         </div>
       </div>
+      
+      <Modal
+        isOpen={modalState.isOpen}
+        onClose={() => setModalState({ ...modalState, isOpen: false })}
+        title={modalState.title}
+        message={modalState.message}
+        type={modalState.type}
+        onConfirm={modalState.onConfirm}
+        confirmText="Supprimer"
+      />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   deleteDoc,
   updateDoc,
 } from 'firebase/firestore';
+import Modal from '@/app/components/Modal';
 
 interface Question {
   id: string;
@@ -38,6 +39,41 @@ export default function EditQCM() {
   const [rankingOrder, setRankingOrder] = useState<number[]>([]); // Ordre pour les questions de type ranking
   const [sessionExists, setSessionExists] = useState(false);
   const [importedQuestions, setImportedQuestions] = useState<Omit<Question, 'id'>[]>([]); // Questions importées en attente de sauvegarde
+  
+  // États pour les modals
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean;
+    type: 'alert' | 'confirm';
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+  }>({
+    isOpen: false,
+    type: 'alert',
+    title: '',
+    message: '',
+  });
+
+  // Fonction helper pour afficher une alerte
+  const showAlert = (title: string, message: string) => {
+    setModalState({
+      isOpen: true,
+      type: 'alert',
+      title,
+      message,
+    });
+  };
+
+  // Fonction helper pour afficher une confirmation
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setModalState({
+      isOpen: true,
+      type: 'confirm',
+      title,
+      message,
+      onConfirm,
+    });
+  };
 
   // Charger les questions de la session
   const loadQuestions = useCallback(async () => {
@@ -82,10 +118,10 @@ export default function EditQCM() {
         hasQCM: true,
       });
       setSessionExists(true);
-      alert('Session créée avec succès !');
+      showAlert('Succès', 'Session créée avec succès !');
     } catch (error) {
       console.error('Erreur lors de la création de la session:', error);
-      alert('Erreur lors de la création de la session');
+      showAlert('Erreur', 'Erreur lors de la création de la session');
     }
   };
 
@@ -93,7 +129,7 @@ export default function EditQCM() {
   const handleJsonImport = async () => {
     try {
       if (!jsonInput.trim()) {
-        alert('Veuillez entrer du contenu JSON');
+        showAlert('Erreur', 'Veuillez entrer du contenu JSON');
         return;
       }
 
@@ -120,7 +156,7 @@ export default function EditQCM() {
             }
           }
         } else {
-          alert('Format JSON invalide. Utilisez un tableau de questions ou le format ligne par ligne.');
+          showAlert('Erreur', 'Format JSON invalide. Utilisez un tableau de questions ou le format ligne par ligne.');
           return;
         }
       }
@@ -177,16 +213,16 @@ export default function EditQCM() {
       });
 
       if (questionsToAdd.length === 0) {
-        alert('Aucune question valide trouvée dans le JSON. Vérifiez le format.');
+        showAlert('Erreur', 'Aucune question valide trouvée dans le JSON. Vérifiez le format.');
         return;
       }
 
       // Afficher l'aperçu des questions importées
       setImportedQuestions(questionsToAdd);
-      alert(`${questionsToAdd.length} question(s) importée(s) avec succès ! Utilisez le bouton "Sauvegarder" pour les enregistrer dans le sondage.`);
+      showAlert('Succès', `${questionsToAdd.length} question(s) importée(s) avec succès ! Utilisez le bouton "Sauvegarder" pour les enregistrer dans le sondage.`);
     } catch (error) {
       console.error('Erreur lors de l\'import JSON:', error);
-      alert('Erreur lors de l\'import JSON. Vérifiez le format.');
+      showAlert('Erreur', 'Erreur lors de l\'import JSON. Vérifiez le format.');
       setImportedQuestions([]);
     }
   };
@@ -194,7 +230,7 @@ export default function EditQCM() {
   // Sauvegarder les questions importées
   const handleSaveImportedQuestions = async () => {
     if (importedQuestions.length === 0) {
-      alert('Aucune question à sauvegarder');
+      showAlert('Erreur', 'Aucune question à sauvegarder');
       return;
     }
 
@@ -208,7 +244,7 @@ export default function EditQCM() {
         })
       );
 
-      alert(`${importedQuestions.length} question(s) sauvegardée(s) avec succès !`);
+      showAlert('Succès', `${importedQuestions.length} question(s) sauvegardée(s) avec succès !`);
       setImportedQuestions([]);
       setJsonInput('');
       setShowJsonImport(false);
@@ -216,9 +252,9 @@ export default function EditQCM() {
     } catch (saveError: any) {
       console.error('Erreur lors de la sauvegarde:', saveError);
       if (saveError?.code === 'permission-denied' || saveError?.message?.includes('permission')) {
-        alert('Erreur de permissions Firebase. Vérifiez que les règles Firestore permettent l\'écriture dans sessions/{sessionId}/questions');
+        showAlert('Erreur', 'Erreur de permissions Firebase. Vérifiez que les règles Firestore permettent l\'écriture dans sessions/{sessionId}/questions');
       } else {
-        alert('Erreur lors de la sauvegarde des questions: ' + (saveError?.message || 'Erreur inconnue'));
+        showAlert('Erreur', 'Erreur lors de la sauvegarde des questions: ' + (saveError?.message || 'Erreur inconnue'));
       }
     }
   };
@@ -226,11 +262,11 @@ export default function EditQCM() {
   // Ajouter ou modifier une question
   const handleSaveQuestion = async () => {
     if (!newQuestion.question.trim()) {
-      alert('Veuillez entrer une question');
+      showAlert('Erreur', 'Veuillez entrer une question');
       return;
     }
     if (newQuestion.options.some(opt => !opt.trim())) {
-      alert('Veuillez remplir toutes les options');
+      showAlert('Erreur', 'Veuillez remplir toutes les options');
       return;
     }
 
@@ -255,43 +291,45 @@ export default function EditQCM() {
         type: 'multiple-choice',
       });
       setRankingOrder([]);
-      alert(editingQuestion ? 'Question modifiée avec succès' : 'Question ajoutée avec succès');
+      showAlert('Succès', editingQuestion ? 'Question modifiée avec succès' : 'Question ajoutée avec succès');
     } catch (error: any) {
       console.error('Erreur lors de la sauvegarde:', error);
       if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
-        alert('Erreur de permissions Firebase. Vérifiez que les règles Firestore permettent l\'écriture dans sessions/{sessionId}/questions');
+        showAlert('Erreur', 'Erreur de permissions Firebase. Vérifiez que les règles Firestore permettent l\'écriture dans sessions/{sessionId}/questions');
       } else {
-        alert('Erreur lors de la sauvegarde: ' + (error?.message || 'Erreur inconnue'));
+        showAlert('Erreur', 'Erreur lors de la sauvegarde: ' + (error?.message || 'Erreur inconnue'));
       }
     }
   };
 
   // Supprimer une question
   const handleDeleteQuestion = async (id: string) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer cette question ?')) {
-      return;
-    }
-
     if (!sessionId || !id) {
-      alert('Erreur: Session ID ou Question ID manquant');
+      showAlert('Erreur', 'Erreur: Session ID ou Question ID manquant');
       return;
     }
 
-    try {
-      console.log('🗑️ Suppression de la question:', id, 'dans la session:', sessionId);
-      const questionRef = doc(db, 'sessions', sessionId, 'questions', id);
-      await deleteDoc(questionRef);
-      console.log('✅ Question supprimée avec succès');
-      await loadQuestions();
-      alert('Question supprimée avec succès');
-    } catch (error: any) {
-      console.error('❌ Erreur lors de la suppression:', error);
-      if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
-        alert('Erreur de permissions Firebase. Vérifiez que les règles Firestore permettent la suppression dans sessions/{sessionId}/questions');
-      } else {
-        alert('Erreur lors de la suppression: ' + (error?.message || 'Erreur inconnue'));
+    showConfirm(
+      'Confirmer la suppression',
+      'Êtes-vous sûr de vouloir supprimer cette question ?',
+      async () => {
+        try {
+          console.log('🗑️ Suppression de la question:', id, 'dans la session:', sessionId);
+          const questionRef = doc(db, 'sessions', sessionId, 'questions', id);
+          await deleteDoc(questionRef);
+          console.log('✅ Question supprimée avec succès');
+          await loadQuestions();
+          showAlert('Succès', 'Question supprimée avec succès');
+        } catch (error: any) {
+          console.error('❌ Erreur lors de la suppression:', error);
+          if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
+            showAlert('Erreur', 'Erreur de permissions Firebase. Vérifiez que les règles Firestore permettent la suppression dans sessions/{sessionId}/questions');
+          } else {
+            showAlert('Erreur', 'Erreur lors de la suppression: ' + (error?.message || 'Erreur inconnue'));
+          }
+        }
       }
-    }
+    );
   };
 
   // Éditer une question
@@ -954,6 +992,16 @@ export default function EditQCM() {
           </>
         )}
       </div>
+      
+      <Modal
+        isOpen={modalState.isOpen}
+        onClose={() => setModalState({ ...modalState, isOpen: false })}
+        title={modalState.title}
+        message={modalState.message}
+        type={modalState.type}
+        onConfirm={modalState.onConfirm}
+        confirmText="Supprimer"
+      />
     </div>
   );
 }

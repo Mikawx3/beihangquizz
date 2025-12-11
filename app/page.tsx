@@ -15,6 +15,7 @@ import {
   deleteDoc,
 } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
+import Modal from '@/app/components/Modal';
 
 export default function Home() {
   const [name, setName] = useState('');
@@ -34,6 +35,30 @@ export default function Home() {
   const [resultsMode, setResultsMode] = useState(false); // Mode résultats (affichage un par un)
   const [currentResultIndex, setCurrentResultIndex] = useState(-1); // Index du résultat actuellement affiché
   const router = useRouter();
+  
+  // États pour les modals
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean;
+    type: 'alert' | 'confirm';
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+  }>({
+    isOpen: false,
+    type: 'alert',
+    title: '',
+    message: '',
+  });
+
+  // Fonction helper pour afficher une alerte
+  const showAlert = (title: string, message: string) => {
+    setModalState({
+      isOpen: true,
+      type: 'alert',
+      title,
+      message,
+    });
+  };
 
   // Charger les questions depuis le sondage associé à la session
   const loadQuestionsFromSurvey = useCallback(async (sid: string) => {
@@ -83,26 +108,30 @@ export default function Home() {
     }
   }, []);
 
-  // Créer ou rejoindre une session
+  // Rejoindre une session existante uniquement
   const handleJoin = async () => {
     if (!name.trim()) {
-      alert('Veuillez entrer votre nom');
+      showAlert('Erreur', 'Veuillez entrer votre nom');
       return;
     }
 
-    // Valider l'ID de session si fourni (doit être uniquement numérique)
-    if (sessionIdInput.trim() && !/^\d+$/.test(sessionIdInput.trim())) {
-      alert('L\'ID de session doit être uniquement un nombre (ex: 1234567890)');
+    // Exiger un ID de session
+    if (!sessionIdInput.trim()) {
+      showAlert('Erreur', 'Veuillez entrer un ID de session pour rejoindre une session existante.');
       return;
     }
 
-    // Déterminer l'ID de session : utiliser l'input si fourni, sinon créer un nouveau (juste un nombre)
-    let finalSessionId = sessionIdInput.trim() || String(Date.now());
-    const isNewSession = !sessionIdInput.trim();
+    // Valider l'ID de session (doit être uniquement numérique)
+    if (!/^\d+$/.test(sessionIdInput.trim())) {
+      showAlert('Erreur', 'L\'ID de session doit être uniquement un nombre (ex: 1234567890)');
+      return;
+    }
+
+    const finalSessionId = sessionIdInput.trim();
 
     // Valider que l'ID est bien une string non vide
     if (!finalSessionId || typeof finalSessionId !== 'string') {
-      alert('Erreur: ID de session invalide');
+      showAlert('Erreur', 'ID de session invalide');
       return;
     }
 
@@ -110,7 +139,6 @@ export default function Home() {
       name,
       sessionIdInput,
       finalSessionId,
-      isNewSession,
     });
 
     try {
@@ -119,42 +147,18 @@ export default function Home() {
 
       console.log('📄 État de la session:', {
         exists: sessionDoc.exists(),
-        isNewSession,
         finalSessionId,
       });
 
-      // Si on essaie de rejoindre une session qui n'existe pas
-      if (!sessionDoc.exists() && !isNewSession) {
-        alert('Session introuvable. Vérifiez l\'ID de session.');
+      // Vérifier que la session existe - ne pas permettre la création automatique
+      if (!sessionDoc.exists()) {
+        showAlert('Erreur', 'Session introuvable. Vérifiez l\'ID de session.\n\nLes sessions doivent être créées depuis le panneau administrateur.');
         console.error('❌ Session introuvable:', finalSessionId);
         return;
       }
 
-      // Créer la session si elle n'existe pas
-      let sessionData: any = null;
-      if (!sessionDoc.exists()) {
-        // Vérifier une dernière fois avant de créer pour éviter les doublons
-        const doubleCheckDoc = await getDoc(sessionRef);
-        if (doubleCheckDoc.exists()) {
-          alert('Cette session existe déjà. Veuillez utiliser un autre ID ou rejoindre cette session.');
-          return;
-        }
-
-        console.log('🆕 Création d\'une nouvelle session:', finalSessionId);
-        // Ne pas mettre adminName ici - sera défini après l'ajout du participant
-        await setDoc(sessionRef, {
-          currentQuestionIndex: -1,
-          isActive: false,
-          createdAt: new Date(),
-          // Pas d'adminName - sera défini par le premier participant
-        });
-        // Récupérer les données après création
-        const newSessionDoc = await getDoc(sessionRef);
-        sessionData = newSessionDoc.exists() ? newSessionDoc.data() : null;
-      } else {
-        // Récupérer les données de la session existante
-        sessionData = sessionDoc.data();
-      }
+      // Récupérer les données de la session existante
+      const sessionData = sessionDoc.data();
 
       // Charger les questions pour vérifier si la session est terminée
       let loadedQuestions: any[] = [];
@@ -250,7 +254,7 @@ export default function Home() {
           console.log('✅ Participant ajouté avec succès dans Firestore:', verifyParticipant.data());
         } else {
           console.error('❌ ERREUR: Le participant n\'a pas été ajouté à Firestore!');
-          alert('Erreur: Impossible d\'ajouter le participant à la base de données');
+          showAlert('Erreur', 'Impossible d\'ajouter le participant à la base de données');
           return;
         }
       }
@@ -282,7 +286,7 @@ export default function Home() {
       listenToSession(finalSessionId);
     } catch (error) {
       console.error('❌ Erreur lors de la connexion:', error);
-      alert('Erreur lors de la connexion: ' + (error as Error).message);
+      showAlert('Erreur', 'Erreur lors de la connexion: ' + (error as Error).message);
     }
   };
 
@@ -996,16 +1000,17 @@ export default function Home() {
           />
           <input
             type="text"
-            placeholder="ID de session (laisser vide pour créer une nouvelle session)"
+            placeholder="ID de session (obligatoire)"
             value={sessionIdInput}
             onChange={(e) => setSessionIdInput(e.target.value)}
             className="input"
             onKeyPress={(e) => e.key === 'Enter' && handleJoin()}
             readOnly={hasSessionIdFromUrl}
             style={hasSessionIdFromUrl ? { background: '#f5f5f5', cursor: 'not-allowed' } : {}}
+            required
           />
           <button onClick={handleJoin} className="button">
-            {sessionIdInput.trim() ? 'Rejoindre la session' : 'Créer une nouvelle session'}
+            Rejoindre la session
           </button>
           {sessionIdInput.trim() && (
             <div style={{ 
@@ -1017,6 +1022,18 @@ export default function Home() {
               color: '#1976d2'
             }}>
               💡 Vous allez rejoindre la session: <strong>{sessionIdInput.trim()}</strong>
+            </div>
+          )}
+          {!sessionIdInput.trim() && (
+            <div style={{ 
+              marginTop: '10px', 
+              padding: '10px', 
+              background: '#fff3cd', 
+              borderRadius: '5px',
+              fontSize: '14px',
+              color: '#856404'
+            }}>
+              ⚠️ Les sessions doivent être créées depuis le panneau administrateur.
             </div>
           )}
         </div>
@@ -2071,6 +2088,15 @@ export default function Home() {
           </div>
         </div>
       )}
+      
+      <Modal
+        isOpen={modalState.isOpen}
+        onClose={() => setModalState({ ...modalState, isOpen: false })}
+        title={modalState.title}
+        message={modalState.message}
+        type={modalState.type}
+        onConfirm={modalState.onConfirm}
+      />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
+import Modal from '@/app/components/Modal';
 
 interface Question {
   id: number;
@@ -43,6 +44,20 @@ export default function AdminPanel() {
   const [selectedSurveyId, setSelectedSurveyId] = useState('');
   const [sessions, setSessions] = useState<any[]>([]);
   const router = useRouter();
+  
+  // États pour les modals
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean;
+    type: 'alert' | 'confirm';
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+  }>({
+    isOpen: false,
+    type: 'alert',
+    title: '',
+    message: '',
+  });
 
   // Charger le mot de passe admin depuis Firestore
   useEffect(() => {
@@ -126,10 +141,31 @@ export default function AdminPanel() {
     }
   }, [isAuthenticated, loadSurveys, loadSessions]);
 
+  // Fonction helper pour afficher une alerte
+  const showAlert = (title: string, message: string) => {
+    setModalState({
+      isOpen: true,
+      type: 'alert',
+      title,
+      message,
+    });
+  };
+
+  // Fonction helper pour afficher une confirmation
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setModalState({
+      isOpen: true,
+      type: 'confirm',
+      title,
+      message,
+      onConfirm,
+    });
+  };
+
   // Vérifier le mot de passe
   const handleLogin = async () => {
     if (!password.trim()) {
-      alert('Veuillez entrer le mot de passe');
+      showAlert('Erreur', 'Veuillez entrer le mot de passe');
       return;
     }
 
@@ -148,12 +184,12 @@ export default function AdminPanel() {
         }
         setPassword('');
       } else {
-        alert('Mot de passe incorrect');
+        showAlert('Erreur', 'Mot de passe incorrect');
         setPassword('');
       }
     } catch (error) {
       console.error('Erreur lors de la vérification:', error);
-      alert('Erreur lors de la connexion');
+      showAlert('Erreur', 'Erreur lors de la connexion');
     }
   };
 
@@ -161,7 +197,7 @@ export default function AdminPanel() {
   const handleChangePassword = async () => {
     const newPassword = prompt('Nouveau mot de passe:');
     if (!newPassword || newPassword.length < 4) {
-      alert('Le mot de passe doit contenir au moins 4 caractères');
+      showAlert('Erreur', 'Le mot de passe doit contenir au moins 4 caractères');
       return;
     }
 
@@ -169,25 +205,25 @@ export default function AdminPanel() {
       const adminRef = doc(db, 'admin', 'config');
       await updateDoc(adminRef, { password: newPassword });
       setAdminPassword(newPassword);
-      alert('Mot de passe modifié avec succès');
+      showAlert('Succès', 'Mot de passe modifié avec succès');
     } catch (error) {
       console.error('Erreur lors de la modification:', error);
-      alert('Erreur lors de la modification du mot de passe');
+      showAlert('Erreur', 'Erreur lors de la modification du mot de passe');
     }
   };
 
   // Ajouter ou modifier une question
   const handleSaveQuestion = async () => {
     if (!newQuestion.question.trim()) {
-      alert('Veuillez entrer une question');
+      showAlert('Erreur', 'Veuillez entrer une question');
       return;
     }
     if (newQuestion.options.some(opt => !opt.trim())) {
-      alert('Veuillez remplir toutes les options');
+      showAlert('Erreur', 'Veuillez remplir toutes les options');
       return;
     }
     if (newQuestion.correct < 0 || newQuestion.correct >= newQuestion.options.length) {
-      alert('Veuillez sélectionner une réponse correcte valide');
+      showAlert('Erreur', 'Veuillez sélectionner une réponse correcte valide');
       return;
     }
 
@@ -213,28 +249,30 @@ export default function AdminPanel() {
         options: ['', '', '', ''],
         correct: 0,
       });
-      alert(editingQuestion ? 'Question modifiée avec succès' : 'Question ajoutée avec succès');
+      showAlert('Succès', editingQuestion ? 'Question modifiée avec succès' : 'Question ajoutée avec succès');
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
-      alert('Erreur lors de la sauvegarde');
+      showAlert('Erreur', 'Erreur lors de la sauvegarde');
     }
   };
 
   // Supprimer une question
   const handleDeleteQuestion = async (id: number) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer cette question ?')) {
-      return;
-    }
-
-    try {
-      const questionRef = doc(db, 'questions', String(id));
-      await deleteDoc(questionRef);
-      await loadQuestions();
-      alert('Question supprimée avec succès');
-    } catch (error) {
-      console.error('Erreur lors de la suppression:', error);
-      alert('Erreur lors de la suppression');
-    }
+    showConfirm(
+      'Confirmer la suppression',
+      'Êtes-vous sûr de vouloir supprimer cette question ?',
+      async () => {
+        try {
+          const questionRef = doc(db, 'questions', String(id));
+          await deleteDoc(questionRef);
+          await loadQuestions();
+          showAlert('Succès', 'Question supprimée avec succès');
+        } catch (error) {
+          console.error('Erreur lors de la suppression:', error);
+          showAlert('Erreur', 'Erreur lors de la suppression');
+        }
+      }
+    );
   };
 
   // Éditer une question
@@ -497,19 +535,22 @@ export default function AdminPanel() {
                           ✏️ Éditer
                         </button>
                         <button
-                          onClick={async () => {
-                            if (!confirm(`Êtes-vous sûr de vouloir supprimer la session "${session.id}" ?\n\nCette action est irréversible et supprimera toutes les données associées (participants, réponses, etc.).`)) {
-                              return;
-                            }
-                            try {
-                              const sessionRef = doc(db, 'sessions', session.id);
-                              await deleteDoc(sessionRef);
-                              await loadSessions();
-                              alert('Session supprimée avec succès');
-                            } catch (error) {
-                              console.error('Erreur lors de la suppression:', error);
-                              alert('Erreur lors de la suppression de la session');
-                            }
+                          onClick={() => {
+                            showConfirm(
+                              'Confirmer la suppression',
+                              `Êtes-vous sûr de vouloir supprimer la session "${session.id}" ?\n\nCette action est irréversible et supprimera toutes les données associées (participants, réponses, etc.).`,
+                              async () => {
+                                try {
+                                  const sessionRef = doc(db, 'sessions', session.id);
+                                  await deleteDoc(sessionRef);
+                                  await loadSessions();
+                                  showAlert('Succès', 'Session supprimée avec succès');
+                                } catch (error) {
+                                  console.error('Erreur lors de la suppression:', error);
+                                  showAlert('Erreur', 'Erreur lors de la suppression de la session');
+                                }
+                              }
+                            );
                           }}
                           style={{
                             padding: '8px 16px',
@@ -619,11 +660,11 @@ export default function AdminPanel() {
             <button
               onClick={async () => {
                 if (!sessionIdInput.trim()) {
-                  alert('Veuillez entrer un ID de session');
+                  showAlert('Erreur', 'Veuillez entrer un ID de session');
                   return;
                 }
                 if (!selectedSurveyId) {
-                  alert('Veuillez sélectionner un sondage');
+                  showAlert('Erreur', 'Veuillez sélectionner un sondage');
                   return;
                 }
                 
@@ -643,14 +684,14 @@ export default function AdminPanel() {
 
                   const selectedSurvey = surveys.find(s => s.id === selectedSurveyId);
                   const surveyName = selectedSurvey?.name || selectedSurveyId;
-                  alert(`Sondage "${surveyName}" associé à la session "${sessionIdInput.trim()}" avec succès !\n\nLa première personne qui rejoindra cette session deviendra l'administrateur.`);
+                  showAlert('Succès', `Sondage "${surveyName}" associé à la session "${sessionIdInput.trim()}" avec succès !\n\nLa première personne qui rejoindra cette session deviendra l'administrateur.`);
                   setSelectedSurveyId('');
                   setSessionIdInput('');
                   // Recharger la liste des sessions
                   await loadSessions();
                 } catch (error: any) {
                   console.error('Erreur:', error);
-                  alert('Erreur lors de l\'association: ' + (error?.message || 'Erreur inconnue'));
+                  showAlert('Erreur', 'Erreur lors de l\'association: ' + (error?.message || 'Erreur inconnue'));
                 }
               }}
               style={{
@@ -884,6 +925,16 @@ export default function AdminPanel() {
           )}
         </div>
       </div>
+      
+      <Modal
+        isOpen={modalState.isOpen}
+        onClose={() => setModalState({ ...modalState, isOpen: false })}
+        title={modalState.title}
+        message={modalState.message}
+        type={modalState.type}
+        onConfirm={modalState.onConfirm}
+        confirmText="Supprimer"
+      />
     </div>
   );
 }

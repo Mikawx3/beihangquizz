@@ -11,12 +11,14 @@ import {
   getDocs,
   deleteDoc,
 } from 'firebase/firestore';
+import Modal from '@/app/components/Modal';
 
 interface Question {
   id: string;
   question: string;
   options: string[];
   type?: 'multiple-choice' | 'ranking';
+  optionsRef?: string; // Référence à une liste partagée
 }
 
 export default function EditSurvey() {
@@ -38,6 +40,41 @@ export default function EditSurvey() {
   const [surveyExists, setSurveyExists] = useState(false);
   const [surveyName, setSurveyName] = useState('');
   const [importedQuestions, setImportedQuestions] = useState<Omit<Question, 'id'>[]>([]);
+  
+  // États pour les modals
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean;
+    type: 'alert' | 'confirm';
+    title: string;
+    message: string;
+    onConfirm?: () => void;
+  }>({
+    isOpen: false,
+    type: 'alert',
+    title: '',
+    message: '',
+  });
+
+  // Fonction helper pour afficher une alerte
+  const showAlert = (title: string, message: string) => {
+    setModalState({
+      isOpen: true,
+      type: 'alert',
+      title,
+      message,
+    });
+  };
+
+  // Fonction helper pour afficher une confirmation
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setModalState({
+      isOpen: true,
+      type: 'confirm',
+      title,
+      message,
+      onConfirm,
+    });
+  };
 
   // Charger le sondage et ses questions
   const loadSurvey = useCallback(async () => {
@@ -81,10 +118,10 @@ export default function EditSurvey() {
         createdAt: new Date(),
       });
       setSurveyExists(true);
-      alert('Sondage créé avec succès !');
+      showAlert('Succès', 'Sondage créé avec succès !');
     } catch (error) {
       console.error('Erreur lors de la création:', error);
-      alert('Erreur lors de la création du sondage');
+      showAlert('Erreur', 'Erreur lors de la création du sondage');
     }
   };
 
@@ -92,7 +129,7 @@ export default function EditSurvey() {
   const handleJsonImport = async () => {
     try {
       if (!jsonInput.trim()) {
-        alert('Veuillez entrer du contenu JSON');
+        showAlert('Erreur', 'Veuillez entrer du contenu JSON');
         return;
       }
 
@@ -118,10 +155,13 @@ export default function EditSurvey() {
             }
           }
         } else {
-          alert('Format JSON invalide.');
+          showAlert('Erreur', 'Format JSON invalide.');
           return;
         }
       }
+
+      // Extraire les listes de réponses partagées si elles existent
+      const sharedOptions: Record<string, string[]> = parsed.sharedOptions || {};
 
       let questionsToAdd: Omit<Question, 'id'>[] = [];
 
@@ -130,12 +170,21 @@ export default function EditSurvey() {
           .filter((q: any) => q && (q.question || q.text))
           .map((q: any) => {
             const questionType = q.type || 'multiple-choice';
-            const options = q.options || q.choices || (Array.isArray(q.options) ? q.options : ['', '', '', '']);
+            let options: string[] = [];
+            
+            // Si la question référence une liste partagée
+            if (q.optionsRef && sharedOptions[q.optionsRef]) {
+              options = sharedOptions[q.optionsRef];
+            } else {
+              // Sinon, utiliser les options directement définies
+              options = q.options || q.choices || (Array.isArray(q.options) ? q.options : ['', '', '', '']);
+            }
             
             return {
               question: q.question || q.text || '',
               options: options,
               type: questionType as 'multiple-choice' | 'ranking',
+              optionsRef: q.optionsRef || undefined,
             };
           });
       } else if (parsed && parsed.questions && Array.isArray(parsed.questions)) {
@@ -143,41 +192,67 @@ export default function EditSurvey() {
           .filter((q: any) => q && (q.question || q.text))
           .map((q: any) => {
             const questionType = q.type || 'multiple-choice';
-            const options = q.options || q.choices || (Array.isArray(q.options) ? q.options : ['', '', '', '']);
+            let options: string[] = [];
+            
+            // Si la question référence une liste partagée
+            if (q.optionsRef && sharedOptions[q.optionsRef]) {
+              options = sharedOptions[q.optionsRef];
+            } else {
+              // Sinon, utiliser les options directement définies
+              options = q.options || q.choices || (Array.isArray(q.options) ? q.options : ['', '', '', '']);
+            }
             
             return {
               question: q.question || q.text || '',
               options: options,
               type: questionType as 'multiple-choice' | 'ranking',
+              optionsRef: q.optionsRef || undefined,
             };
           });
       } else if (parsed && (parsed.question || parsed.text)) {
         const questionType = parsed.type || 'multiple-choice';
-        const options = parsed.options || parsed.choices || ['', '', '', ''];
+        let options: string[] = [];
+        
+        // Si la question référence une liste partagée
+        if (parsed.optionsRef && sharedOptions[parsed.optionsRef]) {
+          options = sharedOptions[parsed.optionsRef];
+        } else {
+          // Sinon, utiliser les options directement définies
+          options = parsed.options || parsed.choices || ['', '', '', ''];
+        }
         
         questionsToAdd = [{
           question: parsed.question || parsed.text || '',
           options: options,
           type: (questionType === 'ranking' ? 'ranking' : 'multiple-choice') as 'multiple-choice' | 'ranking',
+          optionsRef: parsed.optionsRef || undefined,
         }];
       }
 
+      // Valider les questions
       questionsToAdd = questionsToAdd.filter((q) => {
         if (!q.question.trim()) return false;
-        if (!Array.isArray(q.options) || q.options.length < 2) return false;
+        if (!Array.isArray(q.options) || q.options.length < 2) {
+          // Si une référence est utilisée mais la liste n'existe pas, afficher une erreur
+          if (q.optionsRef) {
+            showAlert('Erreur', `La référence "${q.optionsRef}" n'existe pas dans sharedOptions pour la question: "${q.question}"`);
+            return false;
+          }
+          return false;
+        }
         return true;
       });
 
       if (questionsToAdd.length === 0) {
-        alert('Aucune question valide trouvée dans le JSON.');
+        showAlert('Erreur', 'Aucune question valide trouvée dans le JSON.');
         return;
       }
 
       setImportedQuestions(questionsToAdd);
-      alert(`${questionsToAdd.length} question(s) importée(s) ! Utilisez le bouton "Sauvegarder" pour les enregistrer.`);
+      showAlert('Succès', `${questionsToAdd.length} question(s) importée(s) ! Utilisez le bouton "Sauvegarder" pour les enregistrer.`);
     } catch (error) {
       console.error('Erreur lors de l\'import JSON:', error);
-      alert('Erreur lors de l\'import JSON. Vérifiez le format.');
+      showAlert('Erreur', 'Erreur lors de l\'import JSON. Vérifiez le format.');
       setImportedQuestions([]);
     }
   };
@@ -185,7 +260,7 @@ export default function EditSurvey() {
   // Sauvegarder les questions importées
   const handleSaveImportedQuestions = async () => {
     if (importedQuestions.length === 0) {
-      alert('Aucune question à sauvegarder');
+      showAlert('Erreur', 'Aucune question à sauvegarder');
       return;
     }
 
@@ -199,7 +274,7 @@ export default function EditSurvey() {
         })
       );
 
-      alert(`${importedQuestions.length} question(s) sauvegardée(s) avec succès !`);
+      showAlert('Succès', `${importedQuestions.length} question(s) sauvegardée(s) avec succès !`);
       setImportedQuestions([]);
       setJsonInput('');
       setShowJsonImport(false);
@@ -207,9 +282,9 @@ export default function EditSurvey() {
     } catch (saveError: any) {
       console.error('Erreur lors de la sauvegarde:', saveError);
       if (saveError?.code === 'permission-denied' || saveError?.message?.includes('permission')) {
-        alert('Erreur de permissions Firebase. Vérifiez les règles Firestore.');
+        showAlert('Erreur', 'Erreur de permissions Firebase. Vérifiez les règles Firestore.');
       } else {
-        alert('Erreur lors de la sauvegarde: ' + (saveError?.message || 'Erreur inconnue'));
+        showAlert('Erreur', 'Erreur lors de la sauvegarde: ' + (saveError?.message || 'Erreur inconnue'));
       }
     }
   };
@@ -217,11 +292,11 @@ export default function EditSurvey() {
   // Ajouter ou modifier une question
   const handleSaveQuestion = async () => {
     if (!newQuestion.question.trim()) {
-      alert('Veuillez entrer une question');
+      showAlert('Erreur', 'Veuillez entrer une question');
       return;
     }
     if (newQuestion.options.some(opt => !opt.trim())) {
-      alert('Veuillez remplir toutes les options');
+      showAlert('Erreur', 'Veuillez remplir toutes les options');
       return;
     }
 
@@ -246,43 +321,45 @@ export default function EditSurvey() {
         type: 'multiple-choice',
       });
       setRankingOrder([]);
-      alert(editingQuestion ? 'Question modifiée avec succès' : 'Question ajoutée avec succès');
+      showAlert('Succès', editingQuestion ? 'Question modifiée avec succès' : 'Question ajoutée avec succès');
     } catch (error: any) {
       console.error('Erreur lors de la sauvegarde:', error);
       if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
-        alert('Erreur de permissions Firebase. Vérifiez les règles Firestore.');
+        showAlert('Erreur', 'Erreur de permissions Firebase. Vérifiez les règles Firestore.');
       } else {
-        alert('Erreur lors de la sauvegarde: ' + (error?.message || 'Erreur inconnue'));
+        showAlert('Erreur', 'Erreur lors de la sauvegarde: ' + (error?.message || 'Erreur inconnue'));
       }
     }
   };
 
   // Supprimer une question
   const handleDeleteQuestion = async (id: string) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer cette question ?')) {
-      return;
-    }
-
     if (!surveyId || !id) {
-      alert('Erreur: Survey ID ou Question ID manquant');
+      showAlert('Erreur', 'Erreur: Survey ID ou Question ID manquant');
       return;
     }
 
-    try {
-      console.log('🗑️ Suppression de la question:', id, 'dans le sondage:', surveyId);
-      const questionRef = doc(db, 'surveys', surveyId, 'questions', id);
-      await deleteDoc(questionRef);
-      console.log('✅ Question supprimée avec succès');
-      await loadSurvey();
-      alert('Question supprimée avec succès');
-    } catch (error: any) {
-      console.error('❌ Erreur lors de la suppression:', error);
-      if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
-        alert('Erreur de permissions Firebase. Vérifiez les règles Firestore.');
-      } else {
-        alert('Erreur lors de la suppression: ' + (error?.message || 'Erreur inconnue'));
+    showConfirm(
+      'Confirmer la suppression',
+      'Êtes-vous sûr de vouloir supprimer cette question ?',
+      async () => {
+        try {
+          console.log('🗑️ Suppression de la question:', id, 'dans le sondage:', surveyId);
+          const questionRef = doc(db, 'surveys', surveyId, 'questions', id);
+          await deleteDoc(questionRef);
+          console.log('✅ Question supprimée avec succès');
+          await loadSurvey();
+          showAlert('Succès', 'Question supprimée avec succès');
+        } catch (error: any) {
+          console.error('❌ Erreur lors de la suppression:', error);
+          if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
+            showAlert('Erreur', 'Erreur de permissions Firebase. Vérifiez les règles Firestore.');
+          } else {
+            showAlert('Erreur', 'Erreur lors de la suppression: ' + (error?.message || 'Erreur inconnue'));
+          }
+        }
       }
-    }
+    );
   };
 
   // Éditer une question
@@ -447,15 +524,19 @@ export default function EditSurvey() {
                   Formats acceptés :
                   <br />• Array de questions : <code>[{`{question: "...", options: [...], type: "multiple-choice"}`}]</code>
                   <br />• Objet avec propriété questions : <code>{`{questions: [...]}`}</code>
+                  <br />• <strong>Nouveau :</strong> Objet avec listes partagées : <code>{`{sharedOptions: {...}, questions: [...]}`}</code>
                   <br />
                   <br /><strong>Types de questions disponibles :</strong>
                   <br />• <code>&quot;multiple-choice&quot;</code> : Choix multiple
                   <br />• <code>&quot;ranking&quot;</code> : Classement/Tri
+                  <br />
+                  <br /><strong>Listes de réponses partagées :</strong>
+                  <br />Vous pouvez définir des listes de réponses partagées dans <code>sharedOptions</code> et les référencer dans les questions avec <code>optionsRef</code>.
                 </p>
                 <textarea
                   value={jsonInput}
                   onChange={(e) => setJsonInput(e.target.value)}
-                  placeholder={`Exemple JSON:\n[\n  {\n    "question": "Quelle est votre couleur préférée ?",\n    "options": ["Rouge", "Bleu", "Vert", "Jaune"],\n    "type": "multiple-choice"\n  },\n  {\n    "question": "Classer ces villes du nord au sud",\n    "options": ["Paris", "Lyon", "Marseille", "Nice"],\n    "type": "ranking"\n  }\n]\n\nExemple avec 2 questions:\n[\n  {\n    "question": "Classer ces activités par ordre de préférence",\n    "options": ["Lecture", "Sport", "Cinéma", "Musique"],\n    "type": "ranking"\n  },\n  {\n    "question": "Quel est votre moyen de transport préféré ?",\n    "options": ["Voiture", "Vélo", "Transport en commun", "À pied"],\n    "type": "multiple-choice"\n  }\n]`}
+                  placeholder={`Exemple avec listes partagées:\n{\n  "sharedOptions": {\n    "personnes": ["Alice", "Bob", "Charlie", "Diana", "Eve"],\n    "villes": ["Paris", "Lyon", "Marseille", "Nice"]\n  },\n  "questions": [\n    {\n      "question": "Qui préférez-vous ?",\n      "optionsRef": "personnes",\n      "type": "multiple-choice"\n    },\n    {\n      "question": "Classer ces personnes par préférence",\n      "optionsRef": "personnes",\n      "type": "ranking"\n    },\n    {\n      "question": "Quelle ville préférez-vous ?",\n      "optionsRef": "villes",\n      "type": "multiple-choice"\n    }\n  ]\n}\n\nExemple classique (sans listes partagées):\n[\n  {\n    "question": "Quelle est votre couleur préférée ?",\n    "options": ["Rouge", "Bleu", "Vert", "Jaune"],\n    "type": "multiple-choice"\n  },\n  {\n    "question": "Classer ces villes du nord au sud",\n    "options": ["Paris", "Lyon", "Marseille", "Nice"],\n    "type": "ranking"\n  }\n]`}
                   style={{
                     width: '100%',
                     minHeight: '200px',
@@ -549,6 +630,11 @@ export default function EditSurvey() {
                       </div>
                       <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
                         Type: {question.type === 'ranking' ? 'Classement / Tri' : 'Choix multiple'}
+                        {question.optionsRef && (
+                          <span style={{ marginLeft: '10px', color: '#1976d2', fontWeight: '600' }}>
+                            📎 Liste partagée: "{question.optionsRef}"
+                          </span>
+                        )}
                       </div>
                       <div style={{ marginLeft: '15px' }}>
                         {question.options.map((option, optIndex) => (
@@ -961,6 +1047,16 @@ export default function EditSurvey() {
           </>
         )}
       </div>
+      
+      <Modal
+        isOpen={modalState.isOpen}
+        onClose={() => setModalState({ ...modalState, isOpen: false })}
+        title={modalState.title}
+        message={modalState.message}
+        type={modalState.type}
+        onConfirm={modalState.onConfirm}
+        confirmText="Supprimer"
+      />
     </div>
   );
 }
