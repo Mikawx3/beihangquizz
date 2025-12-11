@@ -111,6 +111,21 @@ a {
   background: #ffebee;
 }
 
+.ranking-item {
+  user-select: none;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.ranking-item:active {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.ranking-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
 h1 {
   color: #333;
   margin-bottom: 30px;

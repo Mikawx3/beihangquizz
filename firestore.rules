@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // TOUTES LES PERMISSIONS AUTORISÉES - Mode développement
+    
+    // Sessions et participants - TOUTES PERMISSIONS
+    match /sessions/{sessionId} {
+      allow read, write: if true;
+      
+      match /participants/{participantId} {
+        allow read, write: if true;
+      }
+      
+      // Questions de session - TOUTES PERMISSIONS
+      match /questions/{questionId} {
+        allow read, write: if true;
+      }
+    }
+    
+    // Questions globales - TOUTES PERMISSIONS
+    match /questions/{questionId} {
+      allow read, write: if true;
+    }
+    
+    // Sondages - TOUTES PERMISSIONS
+    match /surveys/{surveyId} {
+      allow read, write: if true;
+      
+      // Questions du sondage - TOUTES PERMISSIONS
+      match /questions/{questionId} {
+        allow read, write: if true;
+      }
+    }
+    
+    // Admin - TOUTES PERMISSIONS
+    match /admin/{document=**} {
+      allow read, write: if true;
+    }
+    
+    // Règle par défaut pour TOUS les autres documents - TOUTES PERMISSIONS
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

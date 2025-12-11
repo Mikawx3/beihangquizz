@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -20,8 +20,13 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
   });
 }
 
-const app = initializeApp(firebaseConfig);
+// Initialiser Firebase uniquement s'il n'est pas déjà initialisé
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+
+// Initialiser Firestore
 export const db = getFirestore(app);
 
-console.log('✅ Firebase initialisé avec le projet:', firebaseConfig.projectId);
+if (typeof window !== 'undefined') {
+  console.log('✅ Firebase initialisé avec le projet:', firebaseConfig.projectId);
+}
 
