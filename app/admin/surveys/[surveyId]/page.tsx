@@ -665,7 +665,7 @@ export default function EditSurvey() {
                         Type: {question.type === 'ranking' ? 'Classement / Tri' : 'Choix multiple'}
                         {question.optionsRef && (
                           <span style={{ marginLeft: '10px', color: '#1976d2', fontWeight: '600' }}>
-                            📎 Liste partagée: "{question.optionsRef}"
+                            📎 Liste partagée: &quot;{question.optionsRef}&quot;
                           </span>
                         )}
                       </div>

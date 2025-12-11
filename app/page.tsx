@@ -592,7 +592,7 @@ export default function Home() {
     }, (error) => {
       console.error('❌ Erreur lors de l\'écoute des participants:', error);
     });
-  }, [name, loadFinalResults, loadQuestionsFromSurvey]);
+  }, [name, loadFinalResults, loadQuestionsFromSurvey, isAdmin, isSpectator, questions, results.length]);
 
   // Calculer les statistiques (mémorisé)
   const questionStats = useMemo(() => {
