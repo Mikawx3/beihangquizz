@@ -292,21 +292,27 @@ export default function Home() {
       
       // Démarrer le timer de 10 secondes
       setQuestionTimer(10);
+      console.log('⏱️ Démarrage du timer de 10 secondes avant la question suivante');
       
-      // Mettre à jour l'index de la question
-      await updateDoc(sessionRef, {
-        currentQuestionIndex: currentIndex + 1,
-      });
-
-      // Timer de compte à rebours
+      // Timer de compte à rebours qui changera la question après 10 secondes
+      let countdown = 10;
       const interval = setInterval(() => {
-        setQuestionTimer((prev) => {
-          if (prev === null || prev <= 1) {
-            clearInterval(interval);
-            return null;
-          }
-          return prev - 1;
-        });
+        countdown -= 1;
+        setQuestionTimer(countdown);
+        
+        if (countdown <= 0) {
+          clearInterval(interval);
+          setQuestionTimer(null);
+          
+          // Changer la question après le délai
+          console.log('✅ Timer terminé, passage à la question suivante');
+          updateDoc(sessionRef, {
+            currentQuestionIndex: currentIndex + 1,
+          }).catch((error) => {
+            console.error('Erreur lors du changement de question:', error);
+            setQuestionTimer(null);
+          });
+        }
       }, 1000);
     } catch (error) {
       console.error('Erreur:', error);
