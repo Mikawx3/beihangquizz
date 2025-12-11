@@ -37,6 +37,7 @@ export default function Home() {
   const [currentResultIndex, setCurrentResultIndex] = useState(-1); // Index du résultat actuellement affiché
   const router = useRouter();
   const hasCheckedLocalStorage = useRef(false); // Pour éviter les vérifications multiples du localStorage
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null); // Référence pour l'intervalle du timer
   
   // États pour les modals
   const [modalState, setModalState] = useState<{
@@ -444,7 +445,7 @@ export default function Home() {
         const question = questionsList[questionIndex];
         setCurrentQuestion(question);
         setShowResults(false);
-        setQuestionTimer(null); // Réinitialiser le timer pour la nouvelle question
+        // Le timer sera réinitialisé via Firestore, pas besoin de le faire ici
         
         // Initialiser l'ordre pour les questions de type ranking
         if (question.type === 'ranking') {
@@ -606,6 +607,47 @@ export default function Home() {
       }
       
       await handleQuestionIndex(data.currentQuestionIndex, data, sid);
+      
+      // Gérer le timer depuis Firestore pour tous les utilisateurs
+      // Nettoyer l'intervalle précédent s'il existe
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+      
+      if (data.questionTimerEndTime && !isResultsMode) {
+        const timerEndTime = data.questionTimerEndTime;
+        const now = Date.now();
+        const remaining = Math.max(0, Math.ceil((timerEndTime - now) / 1000));
+        if (remaining > 0) {
+          setQuestionTimer(remaining);
+          // Mettre à jour le timer toutes les 100ms pour un affichage fluide
+          timerIntervalRef.current = setInterval(() => {
+            const now = Date.now();
+            const remaining = Math.max(0, Math.ceil((timerEndTime - now) / 1000));
+            if (remaining > 0) {
+              setQuestionTimer(remaining);
+            } else {
+              setQuestionTimer(null);
+              if (timerIntervalRef.current) {
+                clearInterval(timerIntervalRef.current);
+                timerIntervalRef.current = null;
+              }
+            }
+          }, 100);
+          // Nettoyer l'intervalle après 12 secondes au cas où
+          setTimeout(() => {
+            if (timerIntervalRef.current) {
+              clearInterval(timerIntervalRef.current);
+              timerIntervalRef.current = null;
+            }
+          }, 12000);
+        } else {
+          setQuestionTimer(null);
+        }
+      } else {
+        setQuestionTimer(null);
+      }
     }, (error) => {
       console.error('❌ Erreur lors de l\'écoute de la session:', error);
     });
@@ -840,35 +882,65 @@ export default function Home() {
         return;
       }
       
-      // Démarrer le timer de 10 secondes
-      setQuestionTimer(10);
+      // Nettoyer l'intervalle précédent s'il existe
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+      
+      // Démarrer le timer de 10 secondes dans Firestore pour synchroniser tous les utilisateurs
+      const timerDuration = 10; // secondes
+      const timerEndTime = Date.now() + (timerDuration * 1000);
       console.log('⏱️ Démarrage du timer de 10 secondes avant la question suivante (index:', nextIndex, ')');
       
-      // Timer de compte à rebours qui changera la question après 10 secondes
-      let countdown = 10;
-      const interval = setInterval(() => {
-        countdown -= 1;
-        setQuestionTimer(countdown);
+      // Stocker le timestamp de fin du timer dans Firestore
+      await updateDoc(sessionRef, {
+        questionTimerEndTime: timerEndTime,
+      });
+      
+      // Timer local pour mettre à jour l'affichage en temps réel (sera aussi synchronisé via Firestore)
+      let countdown = timerDuration;
+      setQuestionTimer(countdown);
+      
+      timerIntervalRef.current = setInterval(() => {
+        const now = Date.now();
+        const remaining = Math.max(0, Math.ceil((timerEndTime - now) / 1000));
+        countdown = remaining;
+        setQuestionTimer(countdown > 0 ? countdown : null);
         
         if (countdown <= 0) {
-          clearInterval(interval);
+          if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+          }
           setQuestionTimer(null);
           
           // Changer la question après le délai
           console.log('✅ Timer terminé, passage à la question suivante (index:', nextIndex, ')');
           updateDoc(sessionRef, {
             currentQuestionIndex: nextIndex,
+            questionTimerEndTime: null, // Réinitialiser le timer
           }).then(() => {
             console.log('✅ Question mise à jour avec succès dans Firestore');
+            setQuestionTimer(null);
           }).catch((error) => {
             console.error('❌ Erreur lors du changement de question:', error);
             setQuestionTimer(null);
           });
         }
-      }, 1000);
+      }, 100);
     } catch (error) {
       console.error('❌ Erreur:', error);
       setQuestionTimer(null);
+      // Réinitialiser le timer dans Firestore en cas d'erreur
+      try {
+        const sessionRef = doc(db, 'sessions', sessionId);
+        await updateDoc(sessionRef, {
+          questionTimerEndTime: null,
+        });
+      } catch (e) {
+        console.error('Erreur lors de la réinitialisation du timer:', e);
+      }
     }
   };
 
@@ -878,6 +950,12 @@ export default function Home() {
 
     const confirmLeave = window.confirm('Êtes-vous sûr de vouloir quitter la session ?');
     if (!confirmLeave) return;
+
+    // Nettoyer l'intervalle du timer
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
 
     try {
       console.log('🚪 Début de la procédure de quitter la session');
@@ -1073,6 +1151,10 @@ export default function Home() {
   useEffect(() => {
     return () => {
       setQuestionTimer(null);
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
     };
   }, []);
 
@@ -2069,21 +2151,26 @@ export default function Home() {
             </div>
           )}
 
+          {/* Afficher le timer pour tous les utilisateurs */}
+          {questionTimer !== null && questionTimer > 0 && (
+            <div style={{
+              padding: '15px',
+              background: '#fff3cd',
+              borderRadius: '10px',
+              textAlign: 'center',
+              marginTop: '20px',
+              marginBottom: '10px'
+            }}>
+              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#856404' }}>
+                ⏱️ Prochaine question dans : {questionTimer}s
+              </div>
+            </div>
+          )}
+
+          {/* Bouton admin pour passer à la question suivante */}
           {isAdmin && (
             <div style={{ marginTop: '20px' }}>
-              {questionTimer !== null && questionTimer > 0 ? (
-                <div style={{
-                  padding: '15px',
-                  background: '#fff3cd',
-                  borderRadius: '10px',
-                  textAlign: 'center',
-                  marginBottom: '10px'
-                }}>
-                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#856404' }}>
-                    ⏱️ Prochaine question dans : {questionTimer}s
-                  </div>
-                </div>
-              ) : (
+              {questionTimer === null || questionTimer <= 0 ? (
                 <button
                   onClick={handleNextQuestion}
                   className="button"
@@ -2093,7 +2180,7 @@ export default function Home() {
                 >
                   Question suivante
                 </button>
-              )}
+              ) : null}
             </div>
           )}
         </>
