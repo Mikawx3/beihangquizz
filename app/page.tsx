@@ -101,12 +101,14 @@ export default function Home() {
         'participants',
         name
       );
+      console.log('📝 Ajout du participant:', name, 'dans la session:', finalSessionId);
       await setDoc(participantRef, {
         name,
         answers: {},
         score: 0,
         joinedAt: new Date(),
       });
+      console.log('✅ Participant ajouté avec succès');
 
       setSessionId(finalSessionId);
       localStorage.setItem('sessionId', finalSessionId);
@@ -168,12 +170,18 @@ export default function Home() {
 
     // Écouter les participants
     const participantsRef = collection(db, 'sessions', sid, 'participants');
+    console.log('👂 Écoute des participants pour la session:', sid);
     onSnapshot(participantsRef, (snapshot) => {
+      console.log('📊 Participants mis à jour:', snapshot.size, 'participant(s)');
       const parts: any[] = [];
       snapshot.forEach((doc) => {
+        console.log('  - Participant:', doc.id, doc.data());
         parts.push({ id: doc.id, ...doc.data() });
       });
       setParticipants(parts.sort((a, b) => b.score - a.score));
+      console.log('✅ Liste des participants mise à jour:', parts.map(p => p.id));
+    }, (error) => {
+      console.error('❌ Erreur lors de l\'écoute des participants:', error);
     });
   }, [name, loadFinalResults]);
 
@@ -406,21 +414,58 @@ export default function Home() {
       ) : (
         <div className="loading">
           <h2>En attente du début du quiz...</h2>
-          <p>Participants connectés: {participants.length}</p>
-          {participants.length > 0 && (
-            <div style={{ marginTop: '20px' }}>
-              {participants.map((p) => (
-                <div key={p.id} style={{ padding: '5px', color: '#666' }}>
-                  ✓ {p.id}
-                </div>
-              ))}
-            </div>
-          )}
+          <div style={{ 
+            background: '#f5f5f5', 
+            padding: '20px', 
+            borderRadius: '10px', 
+            marginTop: '20px' 
+          }}>
+            <h3 style={{ marginBottom: '15px', color: '#333' }}>
+              Participants connectés: {participants.length}
+            </h3>
+            {participants.length > 0 ? (
+              <div style={{ marginTop: '10px' }}>
+                {participants.map((p, index) => (
+                  <div 
+                    key={p.id} 
+                    style={{ 
+                      padding: '10px', 
+                      margin: '5px 0',
+                      background: 'white',
+                      borderRadius: '5px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px'
+                    }}
+                  >
+                    <span style={{ fontSize: '20px' }}>👤</span>
+                    <strong>{p.id}</strong>
+                    {p.id === name && <span style={{ color: '#667eea', fontSize: '12px' }}>(Vous)</span>}
+                    {isAdmin && p.id === name && <span style={{ color: '#f5576c', fontSize: '12px' }}>👑 Admin</span>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ color: '#999', fontStyle: 'italic' }}>
+                Aucun participant pour le moment...
+              </p>
+            )}
+          </div>
           {isAdmin && (
             <button onClick={handleNextQuestion} className="button" style={{ marginTop: '20px' }}>
               Commencer le quiz
             </button>
           )}
+          <div style={{ 
+            marginTop: '20px', 
+            padding: '10px', 
+            background: '#fff3cd', 
+            borderRadius: '5px',
+            fontSize: '12px',
+            color: '#856404'
+          }}>
+            💡 Astuce: Ouvrez la console du navigateur (F12) pour voir les logs de débogage Firebase
+          </div>
         </div>
       )}
     </div>
