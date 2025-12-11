@@ -28,41 +28,38 @@ export default function Home() {
   const [results, setResults] = useState<any[]>([]);
   const [participants, setParticipants] = useState<any[]>([]);
   const [questionTimer, setQuestionTimer] = useState<number | null>(null); // Compte à rebours entre questions
+  const [questions, setQuestions] = useState<any[]>([]); // Questions chargées depuis Firestore
   const router = useRouter();
 
-  // Questions du quiz
-  const questions = [
-    {
-      id: 1,
-      question: 'Quelle est la capitale de la France ?',
-      options: ['Lyon', 'Marseille', 'Paris', 'Toulouse'],
-      correct: 2,
-    },
-    {
-      id: 2,
-      question: 'Quel est le plus grand océan ?',
-      options: ['Atlantique', 'Pacifique', 'Indien', 'Arctique'],
-      correct: 1,
-    },
-    {
-      id: 3,
-      question: 'Combien de continents y a-t-il sur Terre ?',
-      options: ['5', '6', '7', '8'],
-      correct: 2,
-    },
-    {
-      id: 4,
-      question: 'Quel est le langage de programmation le plus populaire ?',
-      options: ['Python', 'JavaScript', 'Java', 'C++'],
-      correct: 1,
-    },
-    {
-      id: 5,
-      question: 'Quelle est la vitesse de la lumière ?',
-      options: ['300 000 km/s', '150 000 km/s', '450 000 km/s', '600 000 km/s'],
-      correct: 0,
-    },
-  ];
+  // Charger les questions depuis Firestore
+  useEffect(() => {
+    const loadQuestions = async () => {
+      try {
+        const questionsRef = collection(db, 'questions');
+        const snapshot = await getDocs(questionsRef);
+        const loadedQuestions: any[] = [];
+        snapshot.forEach((doc) => {
+          loadedQuestions.push({ id: parseInt(doc.id), ...doc.data() });
+        });
+        // Trier par ID
+        loadedQuestions.sort((a, b) => a.id - b.id);
+        setQuestions(loadedQuestions);
+        console.log('✅ Questions chargées depuis Firestore:', loadedQuestions.length);
+      } catch (error) {
+        console.error('❌ Erreur lors du chargement des questions:', error);
+        // Questions par défaut en cas d'erreur
+        setQuestions([
+          {
+            id: 1,
+            question: 'Quelle est la capitale de la France ?',
+            options: ['Lyon', 'Marseille', 'Paris', 'Toulouse'],
+            correct: 2,
+          },
+        ]);
+      }
+    };
+    loadQuestions();
+  }, []);
 
   // Créer ou rejoindre une session
   const handleJoin = async () => {
