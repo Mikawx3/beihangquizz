@@ -20,6 +20,7 @@ import Modal from '@/app/components/Modal';
 export default function Home() {
   const [name, setName] = useState('');
   const [sessionIdInput, setSessionIdInput] = useState(''); // Input pour l'ID de session
+  const [sessionIdFromUrl, setSessionIdFromUrl] = useState(false); // Flag pour savoir si le sessionId vient de l'URL
   const [sessionId, setSessionId] = useState(''); // ID de session actuel (une fois connecté)
   const [isAdmin, setIsAdmin] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState<any>(null);
@@ -162,6 +163,7 @@ export default function Home() {
         console.error('❌ Session introuvable:', finalSessionId);
         // Réinitialiser les champs pour permettre une nouvelle tentative
         setSessionIdInput('');
+        setSessionIdFromUrl(false);
         return;
       }
 
@@ -199,8 +201,13 @@ export default function Home() {
       if (isSessionFinished) {
         console.log('👁️ Session terminée - Mode spectateur activé');
         setIsSpectator(true);
-        setIsAdmin(false);
-        userIsAdmin = false;
+        // Vérifier si l'utilisateur est l'admin original pour garder les droits de contrôle
+        const isOriginalAdmin = sessionData?.adminName === name;
+        userIsAdmin = isOriginalAdmin;
+        setIsAdmin(isOriginalAdmin);
+        if (isOriginalAdmin) {
+          console.log('👑 Vous êtes l\'administrateur original - Vous pouvez contrôler l\'affichage des résultats');
+        }
         // Ne pas ajouter de participant pour ne pas ruiner les stats
         // Mais permettre de voir les résultats
       } else {
@@ -272,7 +279,10 @@ export default function Home() {
       localStorage.setItem('sessionId', finalSessionId);
       localStorage.setItem('participantName', name);
       // Utiliser la valeur calculée directement, pas l'état qui peut ne pas être à jour
-      const finalAdminStatus = userIsAdmin || sessionData?.adminName === name;
+      // En mode spectateur, vérifier si on est l'admin original
+      const finalAdminStatus = isSessionFinished 
+        ? (userIsAdmin || sessionData?.adminName === name)
+        : (userIsAdmin || sessionData?.adminName === name);
       localStorage.setItem('isAdmin', String(finalAdminStatus));
       localStorage.setItem('isSpectator', String(isSessionFinished));
       console.log('💾 Sauvegarde localStorage:', { 
@@ -287,6 +297,13 @@ export default function Home() {
         setQuestions(loadedQuestions);
         setShowResults(true);
         await loadFinalResults(finalSessionId);
+        // S'assurer que la session est en mode résultats si ce n'est pas déjà le cas
+        if (!sessionData?.resultsMode) {
+          await updateDoc(sessionRef, {
+            resultsMode: true,
+            currentResultIndex: 0,
+          });
+        }
       }
 
       // Écouter les changements de session
@@ -527,10 +544,15 @@ export default function Home() {
           if (resultIndex >= 0 && resultIndex < questions.length) {
             setCurrentResultIndex(resultIndex);
           } else if (resultIndex === -1 || resultIndex < 0) {
-            // Initialiser à 0 si pas encore défini
-            await updateDoc(sessionRef, { currentResultIndex: 0 });
+            // Initialiser à 0 si pas encore défini (seulement si admin)
+            if (isAdmin) {
+              await updateDoc(sessionRef, { currentResultIndex: 0 });
+            }
             setCurrentResultIndex(0);
           }
+        } else {
+          // Attendre que les questions soient chargées
+          console.log('⏳ En attente du chargement des questions pour afficher les résultats...');
         }
         return;
       }
@@ -546,10 +568,17 @@ export default function Home() {
           const isFinished = currentIndex >= loadedQuestions.length;
           
           if (isFinished && !isSpectator) {
-            // La session vient de se terminer, passer en mode spectateur
+            // La session vient de se terminer, passer en mode spectateur et mode résultats
             setIsSpectator(true);
             setShowResults(true);
             await loadFinalResults(sid);
+            // S'assurer que la session est en mode résultats si ce n'est pas déjà le cas
+            if (!data.resultsMode) {
+              await updateDoc(sessionRef, {
+                resultsMode: true,
+                currentResultIndex: 0,
+              });
+            }
             return;
           }
           
@@ -564,6 +593,15 @@ export default function Home() {
         setIsSpectator(true);
         setShowResults(true);
         await loadFinalResults(sid);
+        // S'assurer que la session est en mode résultats si ce n'est pas déjà le cas
+        const sessionRef = doc(db, 'sessions', sid);
+        const sessionDoc = await getDoc(sessionRef);
+        if (sessionDoc.exists() && !sessionDoc.data()?.resultsMode) {
+          await updateDoc(sessionRef, {
+            resultsMode: true,
+            currentResultIndex: 0,
+          });
+        }
         return;
       }
       
@@ -609,7 +647,7 @@ export default function Home() {
       const sessionDoc = await getDoc(sessionRef);
       
       if (!sessionDoc.exists()) {
-        alert('Session introuvable');
+        showAlert('Erreur', 'Session introuvable');
         return;
       }
 
@@ -618,16 +656,49 @@ export default function Home() {
       
       if (nextResultIdx >= questions.length) {
         // Tous les résultats ont été affichés
-        alert('Tous les résultats ont été affichés !');
+        showAlert('Information', 'Tous les résultats ont été affichés !');
         return;
       }
       
       await updateDoc(sessionRef, {
         currentResultIndex: nextResultIdx,
       });
+      console.log('✅ Passage au résultat suivant:', nextResultIdx);
     } catch (error) {
       console.error('Erreur lors du passage au résultat suivant:', error);
-      alert('Erreur lors du passage au résultat suivant');
+      showAlert('Erreur', 'Erreur lors du passage au résultat suivant');
+    }
+  };
+
+  // Fonction pour revenir au résultat précédent (admin seulement)
+  const handlePreviousResult = async () => {
+    if (!sessionId || !isAdmin || !resultsMode) return;
+    
+    try {
+      const sessionRef = doc(db, 'sessions', sessionId);
+      const sessionDoc = await getDoc(sessionRef);
+      
+      if (!sessionDoc.exists()) {
+        showAlert('Erreur', 'Session introuvable');
+        return;
+      }
+
+      const currentResultIdx = sessionDoc.data()?.currentResultIndex ?? 0;
+      const previousResultIdx = currentResultIdx - 1;
+      
+      if (previousResultIdx < 0) {
+        // On est déjà au premier résultat
+        showAlert('Information', 'Vous êtes déjà au premier résultat !');
+        return;
+      }
+      
+      await updateDoc(sessionRef, {
+        currentResultIndex: previousResultIdx,
+      });
+      console.log('✅ Retour au résultat précédent:', previousResultIdx);
+    } catch (error) {
+      console.error('Erreur lors du retour au résultat précédent:', error);
+      showAlert('Erreur', 'Erreur lors du retour au résultat précédent');
     }
   };
 
@@ -759,6 +830,8 @@ export default function Home() {
 
       if (nextIndex >= questions.length) {
         console.log('🏁 Fin du sondage, passage en mode résultats');
+        // Charger les résultats finaux avant de passer en mode résultats
+        await loadFinalResults(sessionId);
         await updateDoc(sessionRef, {
           currentQuestionIndex: questions.length,
           resultsMode: true,
@@ -889,6 +962,7 @@ export default function Home() {
       setSessionId('');
       setName('');
       setSessionIdInput('');
+      setSessionIdFromUrl(false);
       setIsAdmin(false);
       setCurrentQuestion(null);
       setSelectedAnswer(null);
@@ -916,6 +990,7 @@ export default function Home() {
       setSessionId('');
       setName('');
       setSessionIdInput('');
+      setSessionIdFromUrl(false);
       setIsAdmin(false);
       setCurrentQuestion(null);
       setSelectedAnswer(null);
@@ -973,6 +1048,7 @@ export default function Home() {
       if (urlSessionId) {
         // Pré-remplir l'ID de session depuis l'URL
         setSessionIdInput(urlSessionId);
+        setSessionIdFromUrl(true); // Marquer que le sessionId vient de l'URL
         // Nettoyer l'URL pour éviter les problèmes
         window.history.replaceState({}, '', window.location.pathname);
       }
@@ -1002,12 +1078,10 @@ export default function Home() {
 
   // Écran de connexion
   if (!sessionId) {
-    const hasSessionIdFromUrl = sessionIdInput.trim() !== '';
-    
     return (
       <div className="container">
         <h1>📊 Beihang Sondage</h1>
-        {hasSessionIdFromUrl && (
+        {sessionIdFromUrl && (
           <div style={{ 
             marginBottom: '20px', 
             padding: '15px', 
@@ -1028,17 +1102,23 @@ export default function Home() {
             onChange={(e) => setName(e.target.value)}
             className="input"
             onKeyPress={(e) => e.key === 'Enter' && handleJoin()}
-            autoFocus={hasSessionIdFromUrl}
+            autoFocus={sessionIdFromUrl}
           />
           <input
             type="text"
             placeholder="ID de session (obligatoire)"
             value={sessionIdInput}
-            onChange={(e) => setSessionIdInput(e.target.value)}
+            onChange={(e) => {
+              setSessionIdInput(e.target.value);
+              // Si l'utilisateur modifie le champ, ce n'est plus depuis l'URL
+              if (sessionIdFromUrl) {
+                setSessionIdFromUrl(false);
+              }
+            }}
             className="input"
             onKeyPress={(e) => e.key === 'Enter' && handleJoin()}
-            readOnly={hasSessionIdFromUrl}
-            style={hasSessionIdFromUrl ? { background: '#f5f5f5', cursor: 'not-allowed' } : {}}
+            readOnly={sessionIdFromUrl}
+            style={sessionIdFromUrl ? { background: '#f5f5f5', cursor: 'not-allowed' } : {}}
             required
           />
           <button onClick={handleJoin} className="button">
@@ -1102,22 +1182,40 @@ export default function Home() {
               )}
             </div>
             {isAdmin && (
-              <button
-                onClick={handleNextResult}
-                disabled={currentResultIndex >= questions.length - 1}
-                className="button"
-                style={{
-                  background: currentResultIndex >= questions.length - 1
-                    ? '#ccc'
-                    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  cursor: currentResultIndex >= questions.length - 1 ? 'not-allowed' : 'pointer',
-                  fontSize: '16px',
-                  padding: '15px 30px',
-                  fontWeight: '600'
-                }}
-              >
-                {currentResultIndex >= questions.length - 1 ? '✅ Dernier résultat' : '➡️ Résultat suivant'}
-              </button>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  onClick={handlePreviousResult}
+                  disabled={currentResultIndex <= 0}
+                  className="button"
+                  style={{
+                    background: currentResultIndex <= 0
+                      ? '#ccc'
+                      : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    cursor: currentResultIndex <= 0 ? 'not-allowed' : 'pointer',
+                    fontSize: '16px',
+                    padding: '15px 30px',
+                    fontWeight: '600'
+                  }}
+                >
+                  ⬅️ Résultat précédent
+                </button>
+                <button
+                  onClick={handleNextResult}
+                  disabled={currentResultIndex >= questions.length - 1}
+                  className="button"
+                  style={{
+                    background: currentResultIndex >= questions.length - 1
+                      ? '#ccc'
+                      : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    cursor: currentResultIndex >= questions.length - 1 ? 'not-allowed' : 'pointer',
+                    fontSize: '16px',
+                    padding: '15px 30px',
+                    fontWeight: '600'
+                  }}
+                >
+                  {currentResultIndex >= questions.length - 1 ? '✅ Dernier résultat' : '➡️ Résultat suivant'}
+                </button>
+              </div>
             )}
           </div>
 
