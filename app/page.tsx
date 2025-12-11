@@ -113,6 +113,13 @@ export default function Home() {
 
       // Créer la session si elle n'existe pas
       if (!sessionDoc.exists()) {
+        // Vérifier une dernière fois avant de créer pour éviter les doublons
+        const doubleCheckDoc = await getDoc(sessionRef);
+        if (doubleCheckDoc.exists()) {
+          alert('Cette session existe déjà. Veuillez utiliser un autre ID ou rejoindre cette session.');
+          return;
+        }
+
         console.log('🆕 Création d\'une nouvelle session:', finalSessionId);
         await setDoc(sessionRef, {
           currentQuestionIndex: -1,
