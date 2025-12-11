@@ -16,6 +16,32 @@ import {
 } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import Modal from '@/app/components/Modal';
+import RevealAnimation from '@/app/components/RevealAnimation';
+
+// Types pour les options avec image et son
+interface Option {
+  text: string;
+  image?: string;
+  sound?: string;
+}
+
+// Fonction helper pour obtenir le texte d'une option
+const getOptionText = (option: string | Option): string => {
+  if (typeof option === 'string') {
+    return option;
+  }
+  return option.text;
+};
+
+// Fonction helper pour obtenir l'image d'une option
+const getOptionImage = (option: string | Option): string | undefined => {
+  if (typeof option === 'string') {
+    return undefined;
+  }
+  return option.image;
+};
+
+// Le son (roulement de tambour) sera le même pour toutes les animations
 
 export default function Home() {
   const [name, setName] = useState('');
@@ -35,6 +61,15 @@ export default function Home() {
   const [isSpectator, setIsSpectator] = useState(false); // Mode spectateur (session terminée)
   const [resultsMode, setResultsMode] = useState(false); // Mode résultats (affichage un par un)
   const [currentResultIndex, setCurrentResultIndex] = useState(-1); // Index du résultat actuellement affiché
+  const [showRevealAnimation, setShowRevealAnimation] = useState(false); // Contrôle l'affichage de l'animation de révélation
+  const [revealAnimationData, setRevealAnimationData] = useState<{
+    question: string;
+    winnerName: string;
+    winnerImage?: string;
+    allOptions?: (string | Option)[];
+  } | null>(null);
+  const [lastAnimatedResultIndex, setLastAnimatedResultIndex] = useState<number>(-1); // Pour éviter de rejouer l'animation pour le même résultat
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(-1); // Index de la question actuelle depuis Firestore
   const router = useRouter();
   const hasCheckedLocalStorage = useRef(false); // Pour éviter les vérifications multiples du localStorage
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null); // Référence pour l'intervalle du timer
@@ -444,6 +479,7 @@ export default function Home() {
         console.log('✅ Affichage de la question:', questionIndex + 1);
         const question = questionsList[questionIndex];
         setCurrentQuestion(question);
+        setCurrentQuestionIndex(questionIndex);
         setShowResults(false);
         // Le timer sera réinitialisé via Firestore, pas besoin de le faire ici
         
@@ -485,11 +521,13 @@ export default function Home() {
       } else if (questionIndex === questionsList.length) {
         // Mode résultats - ne rien faire ici, géré par resultsMode
         console.log('🏆 Mode résultats activé');
+        setCurrentQuestionIndex(questionIndex);
         setQuestionTimer(null);
       } else if (questionIndex === -1) {
         // En attente du début du sondage
         console.log('⏳ En attente du début du sondage');
         setCurrentQuestion(null);
+        setCurrentQuestionIndex(-1);
         setShowResults(false);
         setQuestionTimer(null);
       }
@@ -501,6 +539,10 @@ export default function Home() {
         console.log('⚠️ Session supprimée ou inexistante');
         return;
       }
+
+      // Mettre à jour l'index de la question actuelle
+      const questionIndex = data.currentQuestionIndex ?? -1;
+      setCurrentQuestionIndex(questionIndex);
 
       // Mettre à jour le statut admin si nécessaire
       if (name && name.trim() !== '') {
@@ -528,11 +570,9 @@ export default function Home() {
         setQuestionTimer(null);
         
         // Charger les questions si nécessaire
+        let loadedQuestions = questions;
         if (questions.length === 0 && data.surveyId) {
-          const loadedQuestions = await loadQuestionsFromSurvey(sid);
-          if (loadedQuestions && loadedQuestions.length > 0) {
-            // Questions chargées, continuer
-          }
+          loadedQuestions = await loadQuestionsFromSurvey(sid) || [];
         }
         
         // Charger les résultats si nécessaire
@@ -540,9 +580,9 @@ export default function Home() {
           await loadFinalResults(sid);
         }
         
-        // Mettre à jour l'index du résultat affiché
-        if (questions.length > 0) {
-          if (resultIndex >= 0 && resultIndex < questions.length) {
+        // Mettre à jour l'index du résultat affiché - utiliser loadedQuestions au lieu de questions car l'état React n'est pas encore mis à jour
+        if (loadedQuestions.length > 0) {
+          if (resultIndex >= 0 && resultIndex < loadedQuestions.length) {
             setCurrentResultIndex(resultIndex);
           } else if (resultIndex === -1 || resultIndex < 0) {
             // Initialiser à 0 si pas encore défini (seulement si admin)
@@ -552,8 +592,18 @@ export default function Home() {
             setCurrentResultIndex(0);
           }
         } else {
-          // Attendre que les questions soient chargées
-          console.log('⏳ En attente du chargement des questions pour afficher les résultats...');
+          // Si les questions ne sont pas encore chargées, définir quand même currentResultIndex avec la valeur de Firestore
+          // Cela évite que currentResultIndex reste à -1 pendant le chargement
+          if (resultIndex >= 0) {
+            setCurrentResultIndex(resultIndex);
+          } else {
+            // Initialiser à 0 si pas encore défini (seulement si admin)
+            if (isAdmin) {
+              await updateDoc(sessionRef, { currentResultIndex: 0 });
+              setCurrentResultIndex(0);
+            }
+            console.log('⏳ En attente du chargement des questions pour afficher les résultats...');
+          }
         }
         return;
       }
@@ -680,6 +730,59 @@ export default function Home() {
     return calculateQuestionStats();
   }, [showResults, calculateQuestionStats]);
 
+  // Détecter le gagnant et déclencher l'animation pour les questions multiple-choice
+  useEffect(() => {
+    if (!showResults || !resultsMode || currentResultIndex < 0 || !questionStats || questionStats.length === 0) {
+      return;
+    }
+
+    // Ne pas déclencher l'animation si elle est déjà en cours ou si on a déjà animé ce résultat
+    if (showRevealAnimation || lastAnimatedResultIndex === currentResultIndex) {
+      return;
+    }
+
+    const currentStat = questionStats[currentResultIndex];
+    if (!currentStat || currentStat.type !== 'multiple-choice') {
+      // Pour les questions de type ranking, ne pas afficher d'animation
+      return;
+    }
+
+    // Trouver le gagnant (option avec le plus de votes)
+    const sortedOptions = Object.keys(currentStat.votes)
+      .map(optIdx => parseInt(optIdx))
+      .sort((a, b) => {
+        const votesA = currentStat.votes[a] || 0;
+        const votesB = currentStat.votes[b] || 0;
+        return votesB - votesA;
+      });
+
+    if (sortedOptions.length === 0) {
+      return;
+    }
+
+    const winnerIndex = sortedOptions[0];
+    const winnerVotes = currentStat.votes[winnerIndex] || 0;
+    
+    // Vérifier s'il y a un gagnant unique (pas d'égalité)
+    const secondPlaceVotes = sortedOptions.length > 1 ? (currentStat.votes[sortedOptions[1]] || 0) : 0;
+    
+    if (winnerVotes > secondPlaceVotes && winnerVotes > 0) {
+      const winnerOption = currentStat.options[winnerIndex];
+      const winnerName = getOptionText(winnerOption);
+      const winnerImage = getOptionImage(winnerOption);
+
+      // Déclencher l'animation pour ce nouveau résultat
+      setRevealAnimationData({
+        question: currentStat.question,
+        winnerName,
+        winnerImage,
+        allOptions: currentStat.options || [],
+      });
+      setShowRevealAnimation(true);
+      setLastAnimatedResultIndex(currentResultIndex);
+    }
+  }, [showResults, resultsMode, currentResultIndex, questionStats, showRevealAnimation, lastAnimatedResultIndex]);
+
   // Fonction pour passer au résultat suivant (admin seulement)
   const handleNextResult = async () => {
     if (!sessionId || !isAdmin || !resultsMode) return;
@@ -692,7 +795,7 @@ export default function Home() {
         showAlert('Erreur', 'Session introuvable');
         return;
       }
-
+      
       const currentResultIdx = sessionDoc.data()?.currentResultIndex ?? 0;
       const nextResultIdx = currentResultIdx + 1;
       
@@ -701,6 +804,11 @@ export default function Home() {
         showAlert('Information', 'Tous les résultats ont été affichés !');
         return;
       }
+      
+      // Réinitialiser l'animation pour qu'elle se rejoue pour le nouveau résultat
+      setShowRevealAnimation(false);
+      setRevealAnimationData(null);
+      setLastAnimatedResultIndex(-1); // Réinitialiser pour permettre l'animation du nouveau résultat
       
       await updateDoc(sessionRef, {
         currentResultIndex: nextResultIdx,
@@ -724,7 +832,7 @@ export default function Home() {
         showAlert('Erreur', 'Session introuvable');
         return;
       }
-
+      
       const currentResultIdx = sessionDoc.data()?.currentResultIndex ?? 0;
       const previousResultIdx = currentResultIdx - 1;
       
@@ -733,6 +841,11 @@ export default function Home() {
         showAlert('Information', 'Vous êtes déjà au premier résultat !');
         return;
       }
+      
+      // Réinitialiser l'animation pour qu'elle se rejoue pour le résultat précédent
+      setShowRevealAnimation(false);
+      setRevealAnimationData(null);
+      setLastAnimatedResultIndex(-1); // Réinitialiser pour permettre l'animation du résultat précédent
       
       await updateDoc(sessionRef, {
         currentResultIndex: previousResultIdx,
@@ -839,6 +952,41 @@ export default function Home() {
     }
   };
 
+  // Admin: Passer directement aux résultats (pour la dernière question)
+  const handleViewResults = async () => {
+    if (!sessionId || !isAdmin) return;
+    if (questionTimer !== null && questionTimer > 0) return; // Empêcher si timer actif
+
+    try {
+      // Valider que sessionId est valide
+      if (typeof sessionId !== 'string' || sessionId.trim() === '') {
+        console.error('❌ ID de session invalide:', sessionId);
+        return;
+      }
+
+      const sessionRef = doc(db, 'sessions', sessionId);
+      const sessionDoc = await getDoc(sessionRef);
+      
+      if (!sessionDoc.exists()) {
+        console.error('❌ Session introuvable:', sessionId);
+        alert('Session introuvable');
+        return;
+      }
+
+      console.log('🏁 Passage en mode résultats');
+      // Charger les résultats finaux avant de passer en mode résultats
+      await loadFinalResults(sessionId);
+      await updateDoc(sessionRef, {
+        currentQuestionIndex: questions.length,
+        resultsMode: true,
+        currentResultIndex: 0, // Commencer par le premier résultat
+      });
+    } catch (error) {
+      console.error('❌ Erreur:', error);
+      alert('Erreur lors du passage aux résultats');
+    }
+  };
+
   // Admin: Passer à la question suivante avec délai de 10 secondes
   const handleNextQuestion = async () => {
     if (!sessionId || !isAdmin) return;
@@ -871,14 +1019,8 @@ export default function Home() {
       });
 
       if (nextIndex >= questions.length) {
-        console.log('🏁 Fin du sondage, passage en mode résultats');
-        // Charger les résultats finaux avant de passer en mode résultats
-        await loadFinalResults(sessionId);
-        await updateDoc(sessionRef, {
-          currentQuestionIndex: questions.length,
-          resultsMode: true,
-          currentResultIndex: 0, // Commencer par le premier résultat
-        });
+        // Si c'est la dernière question, passer aux résultats
+        await handleViewResults();
         return;
       }
       
@@ -1237,6 +1379,22 @@ export default function Home() {
 
   // Écran de résultats finaux
   if (showResults) {
+    // Afficher l'animation de révélation si nécessaire
+    if (showRevealAnimation && revealAnimationData) {
+      return (
+        <RevealAnimation
+          question={revealAnimationData.question}
+          winnerName={revealAnimationData.winnerName}
+          winnerImage={revealAnimationData.winnerImage}
+          allOptions={revealAnimationData.allOptions}
+          onComplete={() => {
+            setShowRevealAnimation(false);
+            setRevealAnimationData(null);
+          }}
+        />
+      );
+    }
+
     // Si on est en mode résultats (un par un), n'afficher que le résultat actuel
     if (resultsMode && currentResultIndex >= 0 && currentResultIndex < questions.length) {
       const currentStat = questionStats && Array.isArray(questionStats) 
@@ -1314,23 +1472,25 @@ export default function Home() {
                   <p style={{ color: '#666', marginBottom: '20px', fontSize: '16px', fontWeight: '600' }}>
                     Réponses reçues: {currentStat.totalVotes}
                   </p>
-                  {currentStat.rankingAverages && Object.keys(currentStat.rankingAverages).length > 0 ? (
+                  {currentStat.options && Array.isArray(currentStat.options) && currentStat.options.length > 0 ? (
                     <div>
-                      {currentStat.options && Array.isArray(currentStat.options) && 
-                        Object.keys(currentStat.rankingAverages)
-                          .map(optIdx => parseInt(optIdx))
-                          .sort((a, b) => {
-                            const avgA = currentStat.rankingAverages[a]?.average ?? Infinity;
-                            const avgB = currentStat.rankingAverages[b]?.average ?? Infinity;
-                            return avgA - avgB;
-                          })
-                          .map((optionIndex: number, rankIndex: number) => {
-                            const avgData = currentStat.rankingAverages[optionIndex];
-                            const averagePosition = avgData?.average ?? 0;
-                            const displayedPosition = averagePosition + 1;
-                            const count = avgData?.count ?? 0;
-                            const option = currentStat.options[optionIndex];
-                            const isFirst = rankIndex === 0;
+                      {currentStat.options
+                        .map((option: string | Option, optIndex: number) => ({ option, optIndex }))
+                        .map(({ optIndex }: { option: string | Option; optIndex: number }) => optIndex)
+                        .sort((a: number, b: number) => {
+                          const avgA = currentStat.rankingAverages?.[a]?.average ?? (currentStat.options.length);
+                          const avgB = currentStat.rankingAverages?.[b]?.average ?? (currentStat.options.length);
+                          return avgA - avgB;
+                        })
+                        .map((optionIndex: number, rankIndex: number) => {
+                          const avgData = currentStat.rankingAverages?.[optionIndex];
+                          const averagePosition = avgData?.average ?? (currentStat.options.length - 1);
+                          const displayedPosition = averagePosition + 1;
+                          const count = avgData?.count ?? 0;
+                          const option = currentStat.options[optionIndex];
+                          const optionText = getOptionText(option);
+                          const isFirst = rankIndex === 0 && count > 0;
+                          const hasNoVotes = count === 0;
                             
                             return (
                               <div key={optionIndex} style={{ 
@@ -1351,7 +1511,7 @@ export default function Home() {
                                       color: isFirst ? 'white' : '#333' 
                                     }}>
                                       {isFirst && <span style={{ marginRight: '8px' }}>🏆</span>}
-                                      {option}
+                                      {optionText}
                                     </span>
                                   </div>
                                   <div style={{ textAlign: 'right', marginLeft: '20px' }}>
@@ -1369,8 +1529,52 @@ export default function Home() {
                                     }}>
                                       position moyenne
                                     </div>
+                                    {hasNoVotes ? (
+                                      <div style={{ 
+                                        fontSize: '11px', 
+                                        color: '#999', 
+                                        marginTop: '4px' 
+                                      }}>
+                                        (0 réponse)
+                                      </div>
+                                    ) : (
+                                      <div style={{ 
+                                        fontSize: '11px', 
+                                        color: isFirst ? 'rgba(255,255,255,0.8)' : '#999', 
+                                        marginTop: '4px' 
+                                      }}>
+                                        ({count} réponse{count !== 1 ? 's' : ''})
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
+                                {!hasNoVotes && (
+                                  <div style={{
+                                    marginTop: '10px',
+                                    fontSize: '12px',
+                                    color: isFirst ? 'rgba(255,255,255,0.95)' : '#666',
+                                    fontStyle: 'italic',
+                                    paddingTop: '8px',
+                                    borderTop: isFirst ? '1px solid rgba(255,255,255,0.3)' : '1px solid #f0f0f0'
+                                  }}>
+                                    {averagePosition < 0.5 ? '⭐ Très bien classé (préféré)' : 
+                                     averagePosition < 1.5 ? '👍 Bien classé' :
+                                     averagePosition < 2.5 ? '➖ Moyennement classé' : 
+                                     averagePosition < 3.5 ? '👎 Moins bien classé' : '❌ Très mal classé'}
+                                  </div>
+                                )}
+                                {hasNoVotes && (
+                                  <div style={{
+                                    marginTop: '10px',
+                                    fontSize: '12px',
+                                    color: '#999',
+                                    fontStyle: 'italic',
+                                    paddingTop: '8px',
+                                    borderTop: '1px solid #f0f0f0'
+                                  }}>
+                                    ⚪ Aucune réponse reçue
+                                  </div>
+                                )}
                               </div>
                             );
                           })
@@ -1378,7 +1582,7 @@ export default function Home() {
                     </div>
                   ) : (
                     <div style={{ fontSize: '14px', color: '#999', fontStyle: 'italic' }}>
-                      Aucune réponse de classement reçue pour le moment.
+                      Aucune option disponible.
                     </div>
                   )}
                 </div>
@@ -1398,9 +1602,10 @@ export default function Home() {
                   </div>
                   
                   {currentStat.options && Array.isArray(currentStat.options) && 
-                    Object.keys(currentStat.votes)
-                      .map(optIdx => parseInt(optIdx))
-                      .sort((a, b) => {
+                    currentStat.options
+                      .map((option: string | Option, optIndex: number) => ({ option, optIndex }))
+                      .map(({ optIndex }: { option: string | Option; optIndex: number }) => optIndex)
+                      .sort((a: number, b: number) => {
                         const votesA = currentStat.votes[a] || 0;
                         const votesB = currentStat.votes[b] || 0;
                         return votesB - votesA;
@@ -1409,6 +1614,7 @@ export default function Home() {
                         const votes = currentStat.votes[optionIndex] || 0;
                         const percentage = currentStat.totalVotes > 0 ? (votes / currentStat.totalVotes) * 100 : 0;
                         const option = currentStat.options[optionIndex];
+                        const optionText = getOptionText(option);
                         
                         const getRankColor = (rank: number) => {
                           if (rank === 0) return 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)';
@@ -1458,7 +1664,7 @@ export default function Home() {
                                   fontSize: isTopThree ? '16px' : '15px',
                                   color: '#333'
                                 }}>
-                                  {option}
+                                  {optionText}
                                 </span>
                               </div>
                               <div style={{ 
@@ -1608,24 +1814,26 @@ export default function Home() {
                   <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>
                     Réponses reçues: {stat.totalVotes}
                   </p>
-                  {stat.rankingAverages && Object.keys(stat.rankingAverages).length > 0 ? (
+                  {stat.options && Array.isArray(stat.options) && stat.options.length > 0 ? (
                     <div>
-                      {stat.options && Array.isArray(stat.options) && 
-                        Object.keys(stat.rankingAverages)
-                          .map(optIdx => parseInt(optIdx))
-                          .sort((a, b) => {
-                            // Trier par moyenne croissante (meilleure position = plus petite moyenne)
-                            const avgA = stat.rankingAverages[a]?.average ?? Infinity;
-                            const avgB = stat.rankingAverages[b]?.average ?? Infinity;
-                            return avgA - avgB;
-                          })
-                          .map((optionIndex: number, rankIndex: number) => {
-                            const avgData = stat.rankingAverages[optionIndex];
-                            const averagePosition = avgData?.average ?? 0;
-                            const displayedPosition = averagePosition + 1; // Ajouter 1 pour commencer à 1 au lieu de 0
-                            const count = avgData?.count ?? 0;
-                            const option = stat.options[optionIndex];
-                            const isFirst = rankIndex === 0; // Premier élément (le mieux classé)
+                      {stat.options
+                        .map((option: string | Option, optIndex: number) => ({ option, optIndex }))
+                        .map(({ optIndex }: { option: string | Option; optIndex: number }) => optIndex)
+                        .sort((a: number, b: number) => {
+                          // Trier par moyenne croissante (meilleure position = plus petite moyenne)
+                          const avgA = stat.rankingAverages?.[a]?.average ?? (stat.options.length);
+                          const avgB = stat.rankingAverages?.[b]?.average ?? (stat.options.length);
+                          return avgA - avgB;
+                        })
+                        .map((optionIndex: number, rankIndex: number) => {
+                          const avgData = stat.rankingAverages?.[optionIndex];
+                          const averagePosition = avgData?.average ?? (stat.options.length - 1);
+                          const displayedPosition = averagePosition + 1; // Ajouter 1 pour commencer à 1 au lieu de 0
+                          const count = avgData?.count ?? 0;
+                          const option = stat.options[optionIndex];
+                          const optionText = getOptionText(option);
+                          const isFirst = rankIndex === 0 && count > 0; // Premier élément (le mieux classé)
+                          const hasNoVotes = count === 0;
                             
                             return (
                               <div key={optionIndex} style={{ 
@@ -1646,7 +1854,7 @@ export default function Home() {
                                       color: isFirst ? 'white' : '#333' 
                                     }}>
                                       {isFirst && <span style={{ marginRight: '8px' }}>🏆</span>}
-                                      {option}
+                                      {optionText}
                                     </span>
                                   </div>
                                   <div style={{ textAlign: 'right', marginLeft: '20px' }}>
@@ -1664,28 +1872,52 @@ export default function Home() {
                                     }}>
                                       position moyenne
                                     </div>
-                                    <div style={{ 
-                                      fontSize: '11px', 
-                                      color: isFirst ? 'rgba(255,255,255,0.8)' : '#999', 
-                                      marginTop: '4px' 
-                                    }}>
-                                      ({count} réponse{count !== 1 ? 's' : ''})
-                                    </div>
+                                    {hasNoVotes ? (
+                                      <div style={{ 
+                                        fontSize: '11px', 
+                                        color: '#999', 
+                                        marginTop: '4px' 
+                                      }}>
+                                        (0 réponse)
+                                      </div>
+                                    ) : (
+                                      <div style={{ 
+                                        fontSize: '11px', 
+                                        color: isFirst ? 'rgba(255,255,255,0.8)' : '#999', 
+                                        marginTop: '4px' 
+                                      }}>
+                                        ({count} réponse{count !== 1 ? 's' : ''})
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                                <div style={{
-                                  marginTop: '10px',
-                                  fontSize: '12px',
-                                  color: isFirst ? 'rgba(255,255,255,0.95)' : '#666',
-                                  fontStyle: 'italic',
-                                  paddingTop: '8px',
-                                  borderTop: isFirst ? '1px solid rgba(255,255,255,0.3)' : '1px solid #f0f0f0'
-                                }}>
-                                  {averagePosition < 0.5 ? '⭐ Très bien classé (préféré)' : 
-                                   averagePosition < 1.5 ? '👍 Bien classé' :
-                                   averagePosition < 2.5 ? '➖ Moyennement classé' : 
-                                   averagePosition < 3.5 ? '👎 Moins bien classé' : '❌ Très mal classé'}
-                                </div>
+                                {!hasNoVotes && (
+                                  <div style={{
+                                    marginTop: '10px',
+                                    fontSize: '12px',
+                                    color: isFirst ? 'rgba(255,255,255,0.95)' : '#666',
+                                    fontStyle: 'italic',
+                                    paddingTop: '8px',
+                                    borderTop: isFirst ? '1px solid rgba(255,255,255,0.3)' : '1px solid #f0f0f0'
+                                  }}>
+                                    {averagePosition < 0.5 ? '⭐ Très bien classé (préféré)' : 
+                                     averagePosition < 1.5 ? '👍 Bien classé' :
+                                     averagePosition < 2.5 ? '➖ Moyennement classé' : 
+                                     averagePosition < 3.5 ? '👎 Moins bien classé' : '❌ Très mal classé'}
+                                  </div>
+                                )}
+                                {hasNoVotes && (
+                                  <div style={{
+                                    marginTop: '10px',
+                                    fontSize: '12px',
+                                    color: '#999',
+                                    fontStyle: 'italic',
+                                    paddingTop: '8px',
+                                    borderTop: '1px solid #f0f0f0'
+                                  }}>
+                                    ⚪ Aucune réponse reçue
+                                  </div>
+                                )}
                               </div>
                             );
                           })
@@ -1693,7 +1925,7 @@ export default function Home() {
                     </div>
                   ) : (
                     <div style={{ fontSize: '14px', color: '#999', fontStyle: 'italic' }}>
-                      Aucune réponse de classement reçue pour le moment.
+                      Aucune option disponible.
                     </div>
                   )}
                 </div>
@@ -1714,9 +1946,10 @@ export default function Home() {
                   
                   {/* Trier les options par nombre de votes décroissant */}
                   {stat.options && Array.isArray(stat.options) && 
-                    Object.keys(stat.votes)
-                      .map(optIdx => parseInt(optIdx))
-                      .sort((a, b) => {
+                    stat.options
+                      .map((option: string | Option, optIndex: number) => ({ option, optIndex }))
+                      .map(({ optIndex }: { option: string | Option; optIndex: number }) => optIndex)
+                      .sort((a: number, b: number) => {
                         const votesA = stat.votes[a] || 0;
                         const votesB = stat.votes[b] || 0;
                         return votesB - votesA; // Tri décroissant
@@ -1725,6 +1958,7 @@ export default function Home() {
                         const votes = stat.votes[optIndex] || 0;
                         const percentage = stat.totalVotes > 0 ? (votes / stat.totalVotes) * 100 : 0;
                         const option = stat.options[optIndex];
+                        const optionText = getOptionText(option);
                         
                         // Couleurs selon le classement
                         const getRankColor = (rank: number) => {
@@ -1782,7 +2016,7 @@ export default function Home() {
                                   fontSize: isTopThree ? '16px' : '15px',
                                   color: '#333'
                                 }}>
-                                  {option}
+                                  {optionText}
                                 </span>
                               </div>
                               <div style={{ 
@@ -1869,56 +2103,6 @@ export default function Home() {
                         );
                       })
                   }
-                  
-                  {/* Afficher aussi les options avec 0 vote pour complétude */}
-                  {stat.options && Array.isArray(stat.options) && 
-                    stat.options
-                      .map((option: string, optIndex: number) => ({ option, optIndex }))
-                      .filter(({ optIndex }: { option: string; optIndex: number }) => !stat.votes.hasOwnProperty(optIndex) || stat.votes[optIndex] === 0)
-                      .length > 0 && (
-                        <div style={{
-                          marginTop: '20px',
-                          padding: '15px',
-                          background: '#f5f5f5',
-                          borderRadius: '10px',
-                          border: '1px dashed #ddd'
-                        }}>
-                          <div style={{ 
-                            fontSize: '13px', 
-                            color: '#999', 
-                            fontWeight: '600',
-                            marginBottom: '10px'
-                          }}>
-                            Options sans vote:
-                          </div>
-                          <div style={{ 
-                            display: 'flex', 
-                            flexWrap: 'wrap', 
-                            gap: '8px' 
-                          }}>
-                            {stat.options
-                              .map((option: string, optIndex: number) => ({ option, optIndex }))
-                              .filter(({ optIndex }: { option: string; optIndex: number }) => !stat.votes.hasOwnProperty(optIndex) || stat.votes[optIndex] === 0)
-                              .map(({ option, optIndex }: { option: string; optIndex: number }) => (
-                                <span 
-                                  key={optIndex}
-                                  style={{
-                                    padding: '6px 12px',
-                                    background: 'white',
-                                    borderRadius: '6px',
-                                    fontSize: '13px',
-                                    color: '#999',
-                                    border: '1px solid #e0e0e0'
-                                  }}
-                                >
-                                  {option}
-                                </span>
-                              ))
-                            }
-                          </div>
-                        </div>
-                      )
-                  }
                 </div>
               )}
             </div>
@@ -1983,14 +2167,44 @@ export default function Home() {
   }
 
   // Écran de question
+  const timerDuration = 10; // Durée totale du timer en secondes
+  const progressPercentage = questionTimer !== null && questionTimer > 0 
+    ? ((timerDuration - questionTimer) / timerDuration) * 100 
+    : 0;
+
   return (
-    <div className="container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1>📊 Beihang Sondage</h1>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px' }}>
-          <div style={{ fontSize: '14px', color: '#666' }}>
-            Session: <strong style={{ fontFamily: 'monospace' }}>{sessionId}</strong>
-          </div>
+    <>
+      {/* Barre de progression fixe en haut de l'écran */}
+      {questionTimer !== null && questionTimer > 0 && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: '6px',
+          backgroundColor: '#e0e0e0',
+          zIndex: 9999,
+          width: '100%'
+        }}>
+          <div style={{
+            height: '100%',
+            width: `${progressPercentage}%`,
+            backgroundColor: questionTimer <= 3 ? '#f44336' : questionTimer <= 5 ? '#ff9800' : '#4caf50',
+            transition: 'width 0.1s linear, background-color 0.3s ease',
+            borderRadius: '0 3px 3px 0'
+          }} />
+        </div>
+      )}
+
+      <div className="container" style={{
+        paddingTop: questionTimer !== null && questionTimer > 0 ? '6px' : '0'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h1>📊 Beihang Sondage</h1>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px' }}>
+            <div style={{ fontSize: '14px', color: '#666' }}>
+              Session: <strong style={{ fontFamily: 'monospace' }}>{sessionId}</strong>
+            </div>
           <div style={{ display: 'flex', gap: '5px' }}>
             <button
               onClick={() => {
@@ -2098,13 +2312,13 @@ export default function Home() {
                     }}>
                       {displayIndex + 1}
                     </span>
-                    <span style={{ flex: 1 }}>{currentQuestion.options[optionIndex]}</span>
+                    <span style={{ flex: 1 }}>{getOptionText(currentQuestion.options[optionIndex])}</span>
                     {!hasAnswered && <span style={{ color: '#999', fontSize: '18px' }}>⋮⋮</span>}
                   </div>
                 ))}
               </div>
             ) : (
-              currentQuestion.options.map((option: string, index: number) => (
+              currentQuestion.options.map((option: string | Option, index: number) => (
                 <div
                   key={index}
                   className={`quiz-option ${
@@ -2112,7 +2326,7 @@ export default function Home() {
                   }`}
                   onClick={() => !hasAnswered && !isSpectator && setSelectedAnswer(index)}
                 >
-                  {option}
+                  {getOptionText(option)}
                 </div>
               ))
             )}
@@ -2151,35 +2365,27 @@ export default function Home() {
             </div>
           )}
 
-          {/* Afficher le timer pour tous les utilisateurs */}
-          {questionTimer !== null && questionTimer > 0 && (
-            <div style={{
-              padding: '15px',
-              background: '#fff3cd',
-              borderRadius: '10px',
-              textAlign: 'center',
-              marginTop: '20px',
-              marginBottom: '10px'
-            }}>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#856404' }}>
-                ⏱️ Prochaine question dans : {questionTimer}s
-              </div>
-            </div>
-          )}
-
-          {/* Bouton admin pour passer à la question suivante */}
+          {/* Bouton admin pour passer à la question suivante ou voir les résultats */}
           {isAdmin && (
             <div style={{ marginTop: '20px' }}>
               {questionTimer === null || questionTimer <= 0 ? (
-                <button
-                  onClick={handleNextQuestion}
-                  className="button"
-                  style={{
-                    background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                  }}
-                >
-                  Question suivante
-                </button>
+                (() => {
+                  // Déterminer si on est sur la dernière question
+                  const isLastQuestion = currentQuestionIndex >= 0 && currentQuestionIndex === questions.length - 1;
+                  return (
+                    <button
+                      onClick={isLastQuestion ? handleViewResults : handleNextQuestion}
+                      className="button"
+                      style={{
+                        background: isLastQuestion 
+                          ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                          : 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                      }}
+                    >
+                      {isLastQuestion ? 'Voir les résultats' : 'Question suivante'}
+                    </button>
+                  );
+                })()
               ) : null}
             </div>
           )}
@@ -2315,6 +2521,7 @@ export default function Home() {
         onConfirm={modalState.onConfirm}
       />
     </div>
+    </>
   );
 }
 

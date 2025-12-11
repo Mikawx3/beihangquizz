@@ -13,13 +13,58 @@ import {
 } from 'firebase/firestore';
 import Modal from '@/app/components/Modal';
 
+interface Option {
+  text: string;
+  image?: string; // Nom de fichier ou URL d'image
+  // Le son sera le même pour toutes les animations (roulement de tambour)
+}
+
 interface Question {
   id: string;
   question: string;
-  options: string[];
+  options: (string | Option)[]; // Supporte les strings simples (rétrocompatibilité) ou des objets Option
   type?: 'multiple-choice' | 'ranking';
   optionsRef?: string; // Référence à une liste partagée
 }
+
+// Fonction helper pour normaliser les options (convertir string en Option si nécessaire)
+const normalizeOption = (option: string | Option): Option => {
+  if (typeof option === 'string') {
+    return { text: option };
+  }
+  return option;
+};
+
+// Fonction helper pour obtenir le texte d'une option
+const getOptionText = (option: string | Option): string => {
+  if (typeof option === 'string') {
+    return option;
+  }
+  return option.text;
+};
+
+// Fonction helper pour nettoyer une option (enlever les champs undefined)
+const cleanOption = (option: string | Option): string | Option => {
+  if (typeof option === 'string') {
+    return option;
+  }
+  const cleaned: Option = { text: option.text };
+  if (option.image) {
+    cleaned.image = option.image;
+  }
+  // On ne garde plus le son, il sera le même pour toutes les animations
+  return cleaned;
+};
+
+// Fonction helper pour nettoyer une question avant sauvegarde
+const cleanQuestionForSave = (question: Omit<Question, 'id'>): Omit<Question, 'id'> => {
+  return {
+    question: question.question,
+    options: question.options.map(cleanOption),
+    type: question.type || 'multiple-choice',
+    optionsRef: question.optionsRef || undefined,
+  };
+};
 
 export default function EditSurvey() {
   const params = useParams();
@@ -33,7 +78,7 @@ export default function EditSurvey() {
   const [jsonInput, setJsonInput] = useState('');
   const [newQuestion, setNewQuestion] = useState<Omit<Question, 'id'>>({
     question: '',
-    options: ['', '', '', ''],
+    options: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }],
     type: 'multiple-choice',
   });
   const [rankingOrder, setRankingOrder] = useState<number[]>([]);
@@ -176,7 +221,44 @@ export default function EditSurvey() {
       }
 
       // Extraire les listes de réponses partagées si elles existent
-      const sharedOptions: Record<string, string[]> = parsed.sharedOptions || {};
+      // Supporte maintenant les options avec image et son
+      const sharedOptions: Record<string, (string | Option)[]> = parsed.sharedOptions || {};
+
+      // Fonction helper pour normaliser une option depuis le JSON
+      const normalizeOptionFromJson = (opt: any): Option => {
+        if (typeof opt === 'string') {
+          return { text: opt };
+        }
+        if (typeof opt === 'object' && opt !== null) {
+          const normalized: Option = {
+            text: opt.text || opt.name || String(opt),
+          };
+          // Ajouter l'image seulement si elle existe
+          if (opt.image) {
+            normalized.image = opt.image;
+          }
+          // On ne garde plus le son, il sera le même pour toutes les animations
+          return normalized;
+        }
+        return { text: String(opt) };
+      };
+
+      // Fonction helper pour parser les options d'une question
+      const parseOptions = (q: any, sharedOpts: Record<string, (string | Option)[]>): (string | Option)[] => {
+        // Si la question référence une liste partagée
+        if (q.optionsRef && sharedOpts[q.optionsRef]) {
+          return sharedOpts[q.optionsRef].map(normalizeOptionFromJson);
+        }
+        
+        // Sinon, utiliser les options directement définies
+        const rawOptions = q.options || q.choices || [];
+        if (!Array.isArray(rawOptions)) {
+          return [];
+        }
+        
+        // Normaliser chaque option
+        return rawOptions.map(normalizeOptionFromJson);
+      };
 
       let questionsToAdd: Omit<Question, 'id'>[] = [];
 
@@ -186,22 +268,7 @@ export default function EditSurvey() {
           .filter((q: any) => q && (q.question || q.text))
           .map((q: any) => {
             const questionType = q.type || 'multiple-choice';
-            let options: string[] = [];
-            
-            // Si la question référence une liste partagée
-            if (q.optionsRef && sharedOptions[q.optionsRef]) {
-              options = sharedOptions[q.optionsRef];
-            } else if (q.optionsRef && !sharedOptions[q.optionsRef]) {
-              // Référence invalide
-              console.error(`Référence "${q.optionsRef}" non trouvée dans sharedOptions`);
-              options = [];
-            } else {
-              // Sinon, utiliser les options directement définies
-              options = q.options || q.choices || [];
-              if (!Array.isArray(options)) {
-                options = [];
-              }
-            }
+            const options = parseOptions(q, sharedOptions);
             
             return {
               question: q.question || q.text || '',
@@ -217,18 +284,7 @@ export default function EditSurvey() {
           .filter((q: any) => q && (q.question || q.text))
           .map((q: any) => {
             const questionType = q.type || 'multiple-choice';
-            let options: string[] = [];
-            
-            // Si la question référence une liste partagée
-            if (q.optionsRef && sharedOptions[q.optionsRef]) {
-              options = sharedOptions[q.optionsRef];
-            } else {
-              // Sinon, utiliser les options directement définies
-              options = q.options || q.choices || [];
-              if (!Array.isArray(options)) {
-                options = [];
-              }
-            }
+            const options = parseOptions(q, sharedOptions);
             
             return {
               question: q.question || q.text || '',
@@ -241,18 +297,7 @@ export default function EditSurvey() {
       // Priorité 3: Objet unique avec une question
       else if (parsed && (parsed.question || parsed.text)) {
         const questionType = parsed.type || 'multiple-choice';
-        let options: string[] = [];
-        
-        // Si la question référence une liste partagée
-        if (parsed.optionsRef && sharedOptions[parsed.optionsRef]) {
-          options = sharedOptions[parsed.optionsRef];
-        } else {
-          // Sinon, utiliser les options directement définies
-          options = parsed.options || parsed.choices || [];
-          if (!Array.isArray(options)) {
-            options = [];
-          }
-        }
+        const options = parseOptions(parsed, sharedOptions);
         
         questionsToAdd = [{
           question: parsed.question || parsed.text || '',
@@ -303,7 +348,8 @@ export default function EditSurvey() {
         importedQuestions.map(async (q, index) => {
           const questionId = `q${baseTime}-${index}`;
           const questionRef = doc(db, 'surveys', surveyId, 'questions', questionId);
-          await setDoc(questionRef, q);
+          const cleanedQuestion = cleanQuestionForSave(q);
+          await setDoc(questionRef, cleanedQuestion);
         })
       );
 
@@ -328,7 +374,7 @@ export default function EditSurvey() {
       showAlert('Erreur', 'Veuillez entrer une question');
       return;
     }
-    if (newQuestion.options.some(opt => !opt.trim())) {
+    if (newQuestion.options.some(opt => !getOptionText(opt).trim())) {
       showAlert('Erreur', 'Veuillez remplir toutes les options');
       return;
     }
@@ -339,18 +385,15 @@ export default function EditSurvey() {
         : `q${Date.now()}`;
 
       const questionRef = doc(db, 'surveys', surveyId, 'questions', questionId);
-      await setDoc(questionRef, {
-        question: newQuestion.question,
-        options: newQuestion.options,
-        type: newQuestion.type || 'multiple-choice',
-      });
+      const cleanedQuestion = cleanQuestionForSave(newQuestion);
+      await setDoc(questionRef, cleanedQuestion);
 
       await loadSurvey();
       setShowQuestionForm(false);
       setEditingQuestion(null);
       setNewQuestion({
         question: '',
-        options: ['', '', '', ''],
+        options: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }],
         type: 'multiple-choice',
       });
       setRankingOrder([]);
@@ -400,7 +443,7 @@ export default function EditSurvey() {
     setEditingQuestion(question);
     setNewQuestion({
       question: question.question,
-      options: [...question.options],
+      options: question.options.map(opt => normalizeOption(opt)),
       type: question.type || 'multiple-choice',
     });
     if (question.type === 'ranking') {
@@ -524,7 +567,7 @@ export default function EditSurvey() {
                     setEditingQuestion(null);
                     setNewQuestion({
                       question: '',
-                      options: ['', '', '', ''],
+                      options: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }],
                       type: 'multiple-choice',
                     });
                   }}
@@ -565,6 +608,11 @@ export default function EditSurvey() {
                   <br />
                   <br /><strong>Listes de réponses partagées :</strong>
                   <br />Vous pouvez définir des listes de réponses partagées dans <code>sharedOptions</code> et les référencer dans les questions avec <code>optionsRef</code>.
+                  <br />
+                  <br /><strong>Options avec image :</strong>
+                  <br />Chaque option peut être un objet avec <code>text</code> et <code>image</code> (optionnel).
+                  <br />Exemple : <code>{`{text: "Scooby", image: "scooby.png"}`}</code>
+                  <br />Le son (roulement de tambour) sera le même pour toutes les animations de révélation.
                 </p>
                 <textarea
                   value={jsonInput}
@@ -670,20 +718,23 @@ export default function EditSurvey() {
                         )}
                       </div>
                       <div style={{ marginLeft: '15px' }}>
-                        {question.options.map((option, optIndex) => (
-                          <div
-                            key={optIndex}
-                            style={{
-                              padding: '6px',
-                              margin: '4px 0',
-                              background: '#f5f5f5',
-                              borderRadius: '5px',
-                              fontSize: '14px'
-                            }}
-                          >
-                            {optIndex + 1}. {option}
-                          </div>
-                        ))}
+                        {question.options.map((option, optIndex) => {
+                          const opt = normalizeOption(option);
+                          return (
+                            <div
+                              key={optIndex}
+                              style={{
+                                padding: '6px',
+                                margin: '4px 0',
+                                background: '#f5f5f5',
+                                borderRadius: '5px',
+                                fontSize: '14px'
+                              }}
+                            >
+                              {optIndex + 1}. {opt.text}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
@@ -780,28 +831,54 @@ export default function EditSurvey() {
                     <label style={{ display: 'block', marginBottom: '10px', fontWeight: '600' }}>
                       Options de réponse :
                     </label>
-                    {newQuestion.options.map((option, index) => (
-                      <div key={index} style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{ width: '20px', textAlign: 'center', color: '#999' }}>{index + 1}.</span>
-                        <input
-                          type="text"
-                          placeholder={`Option ${index + 1}`}
-                          value={option}
-                          onChange={(e) => {
-                            const newOptions = [...newQuestion.options];
-                            newOptions[index] = e.target.value;
-                            setNewQuestion({ ...newQuestion, options: newOptions });
-                          }}
-                          style={{
-                            flex: 1,
-                            padding: '10px',
-                            border: '2px solid #e0e0e0',
-                            borderRadius: '8px',
-                            fontSize: '14px'
-                          }}
-                        />
-                      </div>
-                    ))}
+                    {newQuestion.options.map((option, index) => {
+                      const opt = normalizeOption(option);
+                      return (
+                        <div key={index} style={{ marginBottom: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '5px' }}>
+                            <span style={{ width: '20px', textAlign: 'center', color: '#999' }}>{index + 1}.</span>
+                            <input
+                              type="text"
+                              placeholder={`Option ${index + 1}`}
+                              value={opt.text}
+                              onChange={(e) => {
+                                const newOptions = [...newQuestion.options];
+                                const currentOpt = normalizeOption(newOptions[index]);
+                                newOptions[index] = { ...currentOpt, text: e.target.value };
+                                setNewQuestion({ ...newQuestion, options: newOptions });
+                              }}
+                              style={{
+                                flex: 1,
+                                padding: '10px',
+                                border: '2px solid #e0e0e0',
+                                borderRadius: '8px',
+                                fontSize: '14px'
+                              }}
+                            />
+                          </div>
+                          <div style={{ marginLeft: '30px', marginTop: '5px' }}>
+                            <input
+                              type="text"
+                              placeholder="Image (optionnel)"
+                              value={opt.image || ''}
+                              onChange={(e) => {
+                                const newOptions = [...newQuestion.options];
+                                const currentOpt = normalizeOption(newOptions[index]);
+                                newOptions[index] = { ...currentOpt, image: e.target.value || undefined };
+                                setNewQuestion({ ...newQuestion, options: newOptions });
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '8px',
+                                border: '1px solid #e0e0e0',
+                                borderRadius: '6px',
+                                fontSize: '12px'
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
                 {newQuestion.type === 'ranking' && (
@@ -870,10 +947,11 @@ export default function EditSurvey() {
                             <input
                               type="text"
                               placeholder={`Option ${optionIndex + 1}`}
-                              value={newQuestion.options[optionIndex]}
+                              value={getOptionText(newQuestion.options[optionIndex])}
                               onChange={(e) => {
                                 const newOptions = [...newQuestion.options];
-                                newOptions[optionIndex] = e.target.value;
+                                const currentOpt = normalizeOption(newOptions[optionIndex]);
+                                newOptions[optionIndex] = { ...currentOpt, text: e.target.value };
                                 setNewQuestion({ ...newQuestion, options: newOptions });
                               }}
                               style={{
@@ -892,7 +970,7 @@ export default function EditSurvey() {
                     <button
                       type="button"
                       onClick={() => {
-                        const newOptions = [...newQuestion.options, ''];
+                        const newOptions = [...newQuestion.options, { text: '' }];
                         const newOrder = [...rankingOrder, newQuestion.options.length];
                         setNewQuestion({ ...newQuestion, options: newOptions });
                         setRankingOrder(newOrder);
@@ -1001,29 +1079,9 @@ export default function EditSurvey() {
                           </div>
                           {question.type === 'multiple-choice' && (
                             <div style={{ marginLeft: '20px' }}>
-                              {question.options.map((option, index) => (
-                                <div
-                                  key={index}
-                                  style={{
-                                    padding: '8px',
-                                    margin: '5px 0',
-                                    background: 'white',
-                                    borderRadius: '5px',
-                                    border: '1px solid #e0e0e0'
-                                  }}
-                                >
-                                  {index + 1}. {option}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {question.type === 'ranking' && (
-                            <div style={{ marginLeft: '20px' }}>
-                              <p style={{ fontSize: '14px', color: '#666', marginBottom: '10px', fontStyle: 'italic' }}>
-                                Type: Classement / Tri
-                              </p>
-                              <div>
-                                {question.options.map((option, index) => (
+                              {question.options.map((option, index) => {
+                                const opt = normalizeOption(option);
+                                return (
                                   <div
                                     key={index}
                                     style={{
@@ -1034,9 +1092,35 @@ export default function EditSurvey() {
                                       border: '1px solid #e0e0e0'
                                     }}
                                   >
-                                    {index + 1}. {option}
+                                    {index + 1}. {opt.text}
                                   </div>
-                                ))}
+                                );
+                              })}
+                            </div>
+                          )}
+                          {question.type === 'ranking' && (
+                            <div style={{ marginLeft: '20px' }}>
+                              <p style={{ fontSize: '14px', color: '#666', marginBottom: '10px', fontStyle: 'italic' }}>
+                                Type: Classement / Tri
+                              </p>
+                              <div>
+                                {question.options.map((option, index) => {
+                                  const opt = normalizeOption(option);
+                                  return (
+                                    <div
+                                      key={index}
+                                      style={{
+                                        padding: '8px',
+                                        margin: '5px 0',
+                                        background: 'white',
+                                        borderRadius: '5px',
+                                        border: '1px solid #e0e0e0'
+                                      }}
+                                    >
+                                      {index + 1}. {opt.text}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           )}
