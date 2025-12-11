@@ -12,6 +12,7 @@ import {
   where,
   getDocs,
   updateDoc,
+  deleteDoc,
 } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 
@@ -313,6 +314,90 @@ export default function Home() {
     }
   };
 
+  // Fonction pour quitter la session
+  const handleLeaveSession = async () => {
+    if (!sessionId || !name) return;
+
+    const confirmLeave = window.confirm('Êtes-vous sûr de vouloir quitter la session ?');
+    if (!confirmLeave) return;
+
+    try {
+      console.log('🚪 Début de la procédure de quitter la session');
+      
+      const participantRef = doc(db, 'sessions', sessionId, 'participants', name);
+      const sessionRef = doc(db, 'sessions', sessionId);
+      
+      // Récupérer la liste actuelle des participants
+      const participantsRef = collection(db, 'sessions', sessionId, 'participants');
+      const participantsSnapshot = await getDocs(participantsRef);
+      const allParticipants = participantsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      // Si c'est l'admin qui quitte
+      if (isAdmin) {
+        console.log('👑 L\'administrateur quitte la session');
+        
+        // Trouver un autre participant pour devenir admin
+        const otherParticipants = allParticipants.filter(p => p.id !== name);
+        
+        if (otherParticipants.length > 0) {
+          // Transférer l'admin au premier autre participant
+          const newAdmin = otherParticipants[0];
+          console.log('🔄 Transfert de l\'admin à:', newAdmin.id);
+          
+          await updateDoc(sessionRef, {
+            adminName: newAdmin.id,
+          });
+          console.log('✅ Admin transféré avec succès');
+        } else {
+          // Plus de participants, supprimer la session
+          console.log('🗑️ Plus de participants, suppression de la session');
+          
+          // Supprimer tous les participants d'abord
+          for (const participant of allParticipants) {
+            const partRef = doc(db, 'sessions', sessionId, 'participants', participant.id);
+            await deleteDoc(partRef);
+          }
+          
+          // Supprimer la session
+          await deleteDoc(sessionRef);
+          console.log('✅ Session supprimée');
+        }
+      }
+
+      // Supprimer le participant de Firestore
+      console.log('🗑️ Suppression du participant:', name);
+      await deleteDoc(participantRef);
+      console.log('✅ Participant supprimé de Firestore');
+
+      // Nettoyer le localStorage
+      localStorage.removeItem('sessionId');
+      localStorage.removeItem('participantName');
+      localStorage.removeItem('isAdmin');
+      console.log('✅ LocalStorage nettoyé');
+
+      // Réinitialiser tous les états
+      setSessionId('');
+      setName('');
+      setSessionIdInput('');
+      setIsAdmin(false);
+      setCurrentQuestion(null);
+      setSelectedAnswer(null);
+      setHasAnswered(false);
+      setShowResults(false);
+      setResults([]);
+      setParticipants([]);
+      setQuestionTimer(null);
+      
+      console.log('✅ Retour au menu principal');
+    } catch (error) {
+      console.error('❌ Erreur lors de la sortie:', error);
+      alert('Erreur lors de la sortie: ' + (error as Error).message);
+    }
+  };
+
   // Vérifier si l'utilisateur est déjà connecté
   useEffect(() => {
     const savedSessionId = localStorage.getItem('sessionId');
@@ -418,16 +503,28 @@ export default function Home() {
             </div>
           ))}
         </div>
-        <button
-          onClick={() => {
-            localStorage.clear();
-            window.location.reload();
-          }}
-          className="button"
-          style={{ marginTop: '30px' }}
-        >
-          Nouveau Quiz
-        </button>
+        <div style={{ display: 'flex', gap: '10px', marginTop: '30px' }}>
+          <button
+            onClick={handleLeaveSession}
+            className="button"
+            style={{
+              background: 'linear-gradient(135deg, #f5576c 0%, #f093fb 100%)',
+              flex: 1
+            }}
+          >
+            🚪 Quitter la session
+          </button>
+          <button
+            onClick={() => {
+              localStorage.clear();
+              window.location.reload();
+            }}
+            className="button"
+            style={{ flex: 1 }}
+          >
+            🔄 Nouveau Quiz
+          </button>
+        </div>
       </div>
     );
   }
@@ -437,25 +534,42 @@ export default function Home() {
     <div className="container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h1>🎯 Beihang Quiz</h1>
-        <div style={{ fontSize: '14px', color: '#666' }}>
-          <div>Session: <strong style={{ fontFamily: 'monospace' }}>{sessionId}</strong></div>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(sessionId);
-              alert('ID de session copié !');
-            }}
-            style={{
-              marginTop: '5px',
-              padding: '5px 10px',
-              fontSize: '12px',
-              background: '#f5f5f5',
-              border: '1px solid #ddd',
-              borderRadius: '5px',
-              cursor: 'pointer'
-            }}
-          >
-            📋 Copier l'ID
-          </button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px' }}>
+          <div style={{ fontSize: '14px', color: '#666' }}>
+            Session: <strong style={{ fontFamily: 'monospace' }}>{sessionId}</strong>
+          </div>
+          <div style={{ display: 'flex', gap: '5px' }}>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(sessionId);
+                alert('ID de session copié !');
+              }}
+              style={{
+                padding: '5px 10px',
+                fontSize: '12px',
+                background: '#f5f5f5',
+                border: '1px solid #ddd',
+                borderRadius: '5px',
+                cursor: 'pointer'
+              }}
+            >
+              📋 Copier
+            </button>
+            <button
+              onClick={handleLeaveSession}
+              style={{
+                padding: '5px 10px',
+                fontSize: '12px',
+                background: '#ffebee',
+                border: '1px solid #f44336',
+                borderRadius: '5px',
+                cursor: 'pointer',
+                color: '#c62828'
+              }}
+            >
+              🚪 Quitter
+            </button>
+          </div>
         </div>
       </div>
 
@@ -579,6 +693,16 @@ export default function Home() {
               Commencer le quiz
             </button>
           )}
+          <button
+            onClick={handleLeaveSession}
+            className="button"
+            style={{
+              marginTop: '20px',
+              background: 'linear-gradient(135deg, #f5576c 0%, #f093fb 100%)',
+            }}
+          >
+            🚪 Quitter la session
+          </button>
           <div style={{ 
             marginTop: '20px', 
             padding: '10px', 
