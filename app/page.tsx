@@ -217,7 +217,12 @@ export default function Home() {
       }
 
       const questionIndex = data.currentQuestionIndex;
-      console.log('📊 Question index mis à jour:', questionIndex, '/', questions.length);
+      console.log('📊 Question index mis à jour:', questionIndex, '/', questions.length, 'questions disponibles');
+      
+      if (questions.length === 0) {
+        console.log('⚠️ Aucune question disponible, attente du chargement...');
+        return;
+      }
       
       if (questionIndex >= 0 && questionIndex < questions.length) {
         console.log('✅ Affichage de la question:', questionIndex + 1);
