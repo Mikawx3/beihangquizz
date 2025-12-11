@@ -17,7 +17,8 @@ import { useRouter } from 'next/navigation';
 
 export default function Home() {
   const [name, setName] = useState('');
-  const [sessionId, setSessionId] = useState('');
+  const [sessionIdInput, setSessionIdInput] = useState(''); // Input pour l'ID de session
+  const [sessionId, setSessionId] = useState(''); // ID de session actuel (une fois connecté)
   const [isAdmin, setIsAdmin] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState<any>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
@@ -25,6 +26,7 @@ export default function Home() {
   const [showResults, setShowResults] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [participants, setParticipants] = useState<any[]>([]);
+  const [questionTimer, setQuestionTimer] = useState<number | null>(null); // Compte à rebours entre questions
   const router = useRouter();
 
   // Questions du quiz
@@ -63,22 +65,48 @@ export default function Home() {
 
   // Créer ou rejoindre une session
   const handleJoin = async () => {
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      alert('Veuillez entrer votre nom');
+      return;
+    }
 
-    let finalSessionId = sessionId || `session-${Date.now()}`;
-    const isNewSession = !sessionId;
+    // Valider l'ID de session si fourni (doit être uniquement numérique)
+    if (sessionIdInput.trim() && !/^\d+$/.test(sessionIdInput.trim())) {
+      alert('L\'ID de session doit être uniquement un nombre (ex: 1234567890)');
+      return;
+    }
+
+    // Déterminer l'ID de session : utiliser l'input si fourni, sinon créer un nouveau (juste un nombre)
+    const finalSessionId = sessionIdInput.trim() || String(Date.now());
+    const isNewSession = !sessionIdInput.trim();
+
+    console.log('🔗 Tentative de connexion:', {
+      name,
+      sessionIdInput,
+      finalSessionId,
+      isNewSession,
+    });
 
     try {
       const sessionRef = doc(db, 'sessions', finalSessionId);
       const sessionDoc = await getDoc(sessionRef);
 
+      console.log('📄 État de la session:', {
+        exists: sessionDoc.exists(),
+        isNewSession,
+        finalSessionId,
+      });
+
+      // Si on essaie de rejoindre une session qui n'existe pas
       if (!sessionDoc.exists() && !isNewSession) {
-        alert('Session introuvable');
+        alert('Session introuvable. Vérifiez l\'ID de session.');
+        console.error('❌ Session introuvable:', finalSessionId);
         return;
       }
 
+      // Créer la session si elle n'existe pas
       if (!sessionDoc.exists()) {
-        // Créer la session
+        console.log('🆕 Création d\'une nouvelle session:', finalSessionId);
         await setDoc(sessionRef, {
           currentQuestionIndex: -1,
           isActive: true,
@@ -86,14 +114,21 @@ export default function Home() {
           adminName: name,
         });
         setIsAdmin(true);
+        console.log('✅ Session créée, vous êtes l\'administrateur');
       } else {
+        // Rejoindre une session existante
+        console.log('👋 Rejoindre une session existante:', finalSessionId);
         const sessionData = sessionDoc.data();
-        if (sessionData.adminName === name) {
+        if (sessionData?.adminName === name) {
           setIsAdmin(true);
+          console.log('✅ Vous êtes l\'administrateur de cette session');
+        } else {
+          setIsAdmin(false);
+          console.log('👤 Vous rejoignez en tant que participant');
         }
       }
 
-      // Ajouter le participant
+      // Ajouter le participant (écrase si déjà présent avec le même nom)
       const participantRef = doc(
         db,
         'sessions',
@@ -102,24 +137,42 @@ export default function Home() {
         name
       );
       console.log('📝 Ajout du participant:', name, 'dans la session:', finalSessionId);
+      
+      // Vérifier si le participant existe déjà
+      const existingParticipant = await getDoc(participantRef);
+      if (existingParticipant.exists()) {
+        console.log('⚠️ Participant existe déjà, mise à jour...');
+      }
+      
       await setDoc(participantRef, {
         name,
         answers: {},
         score: 0,
         joinedAt: new Date(),
       });
-      console.log('✅ Participant ajouté avec succès');
+      
+      // Vérifier que le participant a bien été ajouté
+      const verifyParticipant = await getDoc(participantRef);
+      if (verifyParticipant.exists()) {
+        console.log('✅ Participant ajouté avec succès dans Firestore:', verifyParticipant.data());
+      } else {
+        console.error('❌ ERREUR: Le participant n\'a pas été ajouté à Firestore!');
+        alert('Erreur: Impossible d\'ajouter le participant à la base de données');
+        return;
+      }
 
+      // Mettre à jour l'état et le localStorage
       setSessionId(finalSessionId);
       localStorage.setItem('sessionId', finalSessionId);
       localStorage.setItem('participantName', name);
       localStorage.setItem('isAdmin', String(isAdmin || sessionDoc.data()?.adminName === name));
 
       // Écouter les changements de session
+      console.log('👂 Démarrage de l\'écoute pour la session:', finalSessionId);
       listenToSession(finalSessionId);
     } catch (error) {
-      console.error('Erreur:', error);
-      alert('Erreur lors de la connexion');
+      console.error('❌ Erreur lors de la connexion:', error);
+      alert('Erreur lors de la connexion: ' + (error as Error).message);
     }
   };
 
@@ -148,6 +201,7 @@ export default function Home() {
       if (questionIndex >= 0 && questionIndex < questions.length) {
         setCurrentQuestion(questions[questionIndex]);
         setShowResults(false);
+        setQuestionTimer(null); // Réinitialiser le timer pour la nouvelle question
         
         // Vérifier si l'utilisateur a déjà répondu
         const participantRef = doc(db, 'sessions', sid, 'participants', name);
@@ -164,6 +218,7 @@ export default function Home() {
         }
       } else if (questionIndex === questions.length) {
         // Afficher les résultats finaux
+        setQuestionTimer(null);
         await loadFinalResults(sid);
       }
     });
@@ -224,20 +279,37 @@ export default function Home() {
     }
   };
 
-  // Admin: Passer à la question suivante
+  // Admin: Passer à la question suivante avec délai de 10 secondes
   const handleNextQuestion = async () => {
     if (!sessionId || !isAdmin) return;
+    if (questionTimer !== null && questionTimer > 0) return; // Empêcher si timer actif
 
     try {
       const sessionRef = doc(db, 'sessions', sessionId);
       const sessionDoc = await getDoc(sessionRef);
       const currentIndex = sessionDoc.data()?.currentQuestionIndex || -1;
       
+      // Démarrer le timer de 10 secondes
+      setQuestionTimer(10);
+      
+      // Mettre à jour l'index de la question
       await updateDoc(sessionRef, {
         currentQuestionIndex: currentIndex + 1,
       });
+
+      // Timer de compte à rebours
+      const interval = setInterval(() => {
+        setQuestionTimer((prev) => {
+          if (prev === null || prev <= 1) {
+            clearInterval(interval);
+            return null;
+          }
+          return prev - 1;
+        });
+      }, 1000);
     } catch (error) {
       console.error('Erreur:', error);
+      setQuestionTimer(null);
     }
   };
 
@@ -255,6 +327,13 @@ export default function Home() {
     }
   }, [listenToSession]);
 
+  // Nettoyer le timer quand le composant est démonté
+  useEffect(() => {
+    return () => {
+      setQuestionTimer(null);
+    };
+  }, []);
+
   // Écran de connexion
   if (!sessionId) {
     return (
@@ -271,15 +350,27 @@ export default function Home() {
           />
           <input
             type="text"
-            placeholder="ID de session (laisser vide pour créer)"
-            value={sessionId}
-            onChange={(e) => setSessionId(e.target.value)}
+            placeholder="ID de session (laisser vide pour créer une nouvelle session)"
+            value={sessionIdInput}
+            onChange={(e) => setSessionIdInput(e.target.value)}
             className="input"
             onKeyPress={(e) => e.key === 'Enter' && handleJoin()}
           />
           <button onClick={handleJoin} className="button">
-            {sessionId ? 'Rejoindre' : 'Créer une session'}
+            {sessionIdInput.trim() ? 'Rejoindre la session' : 'Créer une nouvelle session'}
           </button>
+          {sessionIdInput.trim() && (
+            <div style={{ 
+              marginTop: '10px', 
+              padding: '10px', 
+              background: '#e3f2fd', 
+              borderRadius: '5px',
+              fontSize: '14px',
+              color: '#1976d2'
+            }}>
+              💡 Vous allez rejoindre la session: <strong>{sessionIdInput.trim()}</strong>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -347,7 +438,24 @@ export default function Home() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h1>🎯 Beihang Quiz</h1>
         <div style={{ fontSize: '14px', color: '#666' }}>
-          Session: {sessionId.slice(-8)}
+          <div>Session: <strong style={{ fontFamily: 'monospace' }}>{sessionId}</strong></div>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(sessionId);
+              alert('ID de session copié !');
+            }}
+            style={{
+              marginTop: '5px',
+              padding: '5px 10px',
+              fontSize: '12px',
+              background: '#f5f5f5',
+              border: '1px solid #ddd',
+              borderRadius: '5px',
+              cursor: 'pointer'
+            }}
+          >
+            📋 Copier l'ID
+          </button>
         </div>
       </div>
 
@@ -399,16 +507,31 @@ export default function Home() {
           )}
 
           {isAdmin && (
-            <button
-              onClick={handleNextQuestion}
-              className="button"
-              style={{
-                marginTop: '20px',
-                background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-              }}
-            >
-              Question suivante
-            </button>
+            <div style={{ marginTop: '20px' }}>
+              {questionTimer !== null && questionTimer > 0 ? (
+                <div style={{
+                  padding: '15px',
+                  background: '#fff3cd',
+                  borderRadius: '10px',
+                  textAlign: 'center',
+                  marginBottom: '10px'
+                }}>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#856404' }}>
+                    ⏱️ Prochaine question dans : {questionTimer}s
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={handleNextQuestion}
+                  className="button"
+                  style={{
+                    background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                  }}
+                >
+                  Question suivante
+                </button>
+              )}
+            </div>
           )}
         </>
       ) : (
