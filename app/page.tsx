@@ -78,8 +78,14 @@ export default function Home() {
     }
 
     // Déterminer l'ID de session : utiliser l'input si fourni, sinon créer un nouveau (juste un nombre)
-    const finalSessionId = sessionIdInput.trim() || String(Date.now());
+    let finalSessionId = sessionIdInput.trim() || String(Date.now());
     const isNewSession = !sessionIdInput.trim();
+
+    // Valider que l'ID est bien une string non vide
+    if (!finalSessionId || typeof finalSessionId !== 'string') {
+      alert('Erreur: ID de session invalide');
+      return;
+    }
 
     console.log('🔗 Tentative de connexion:', {
       name,
@@ -191,40 +197,71 @@ export default function Home() {
 
   // Écouter les changements de session
   const listenToSession = useCallback((sid: string) => {
+    // Valider que sid est bien une string valide
+    if (!sid || typeof sid !== 'string' || sid.trim() === '') {
+      console.error('❌ ID de session invalide:', sid);
+      return;
+    }
+
     const sessionRef = doc(db, 'sessions', sid);
     
     onSnapshot(sessionRef, async (snapshot) => {
       const data = snapshot.data();
-      if (!data) return;
+      if (!data) {
+        console.log('⚠️ Session supprimée ou inexistante');
+        return;
+      }
 
       const questionIndex = data.currentQuestionIndex;
+      console.log('📊 Question index mis à jour:', questionIndex, '/', questions.length);
       
       if (questionIndex >= 0 && questionIndex < questions.length) {
+        console.log('✅ Affichage de la question:', questionIndex + 1);
         setCurrentQuestion(questions[questionIndex]);
         setShowResults(false);
         setQuestionTimer(null); // Réinitialiser le timer pour la nouvelle question
         
         // Vérifier si l'utilisateur a déjà répondu
-        const participantRef = doc(db, 'sessions', sid, 'participants', name);
-        const participantDoc = await getDoc(participantRef);
-        if (participantDoc.exists()) {
-          const answers = participantDoc.data().answers || {};
-          if (answers[questionIndex] !== undefined) {
-            setHasAnswered(true);
-            setSelectedAnswer(answers[questionIndex]);
-          } else {
-            setHasAnswered(false);
-            setSelectedAnswer(null);
+        if (name && name.trim() !== '') {
+          const participantRef = doc(db, 'sessions', sid, 'participants', name);
+          try {
+            const participantDoc = await getDoc(participantRef);
+            if (participantDoc.exists()) {
+              const answers = participantDoc.data().answers || {};
+              if (answers[questionIndex] !== undefined) {
+                setHasAnswered(true);
+                setSelectedAnswer(answers[questionIndex]);
+              } else {
+                setHasAnswered(false);
+                setSelectedAnswer(null);
+              }
+            }
+          } catch (error) {
+            console.error('Erreur lors de la vérification des réponses:', error);
           }
         }
       } else if (questionIndex === questions.length) {
         // Afficher les résultats finaux
+        console.log('🏆 Affichage des résultats finaux');
         setQuestionTimer(null);
         await loadFinalResults(sid);
+      } else if (questionIndex === -1) {
+        // En attente du début du quiz
+        console.log('⏳ En attente du début du quiz');
+        setCurrentQuestion(null);
+        setShowResults(false);
+        setQuestionTimer(null);
       }
+    }, (error) => {
+      console.error('❌ Erreur lors de l\'écoute de la session:', error);
     });
 
     // Écouter les participants
+    if (!sid || typeof sid !== 'string' || sid.trim() === '') {
+      console.error('❌ ID de session invalide pour les participants:', sid);
+      return;
+    }
+
     const participantsRef = collection(db, 'sessions', sid, 'participants');
     console.log('👂 Écoute des participants pour la session:', sid);
     onSnapshot(participantsRef, (snapshot) => {
@@ -286,13 +323,42 @@ export default function Home() {
     if (questionTimer !== null && questionTimer > 0) return; // Empêcher si timer actif
 
     try {
+      // Valider que sessionId est valide
+      if (typeof sessionId !== 'string' || sessionId.trim() === '') {
+        console.error('❌ ID de session invalide:', sessionId);
+        return;
+      }
+
       const sessionRef = doc(db, 'sessions', sessionId);
       const sessionDoc = await getDoc(sessionRef);
-      const currentIndex = sessionDoc.data()?.currentQuestionIndex || -1;
+      
+      if (!sessionDoc.exists()) {
+        console.error('❌ Session introuvable:', sessionId);
+        alert('Session introuvable');
+        return;
+      }
+
+      const currentIndex = sessionDoc.data()?.currentQuestionIndex ?? -1;
+      const nextIndex = currentIndex + 1;
+      
+      console.log('📊 État actuel:', {
+        currentIndex,
+        nextIndex,
+        totalQuestions: questions.length,
+        canGoNext: nextIndex < questions.length
+      });
+
+      if (nextIndex >= questions.length) {
+        console.log('🏁 Fin du quiz, affichage des résultats');
+        await updateDoc(sessionRef, {
+          currentQuestionIndex: questions.length,
+        });
+        return;
+      }
       
       // Démarrer le timer de 10 secondes
       setQuestionTimer(10);
-      console.log('⏱️ Démarrage du timer de 10 secondes avant la question suivante');
+      console.log('⏱️ Démarrage du timer de 10 secondes avant la question suivante (index:', nextIndex, ')');
       
       // Timer de compte à rebours qui changera la question après 10 secondes
       let countdown = 10;
@@ -305,17 +371,19 @@ export default function Home() {
           setQuestionTimer(null);
           
           // Changer la question après le délai
-          console.log('✅ Timer terminé, passage à la question suivante');
+          console.log('✅ Timer terminé, passage à la question suivante (index:', nextIndex, ')');
           updateDoc(sessionRef, {
-            currentQuestionIndex: currentIndex + 1,
+            currentQuestionIndex: nextIndex,
+          }).then(() => {
+            console.log('✅ Question mise à jour avec succès dans Firestore');
           }).catch((error) => {
-            console.error('Erreur lors du changement de question:', error);
+            console.error('❌ Erreur lors du changement de question:', error);
             setQuestionTimer(null);
           });
         }
       }, 1000);
     } catch (error) {
-      console.error('Erreur:', error);
+      console.error('❌ Erreur:', error);
       setQuestionTimer(null);
     }
   };
