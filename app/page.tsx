@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -35,6 +35,7 @@ export default function Home() {
   const [resultsMode, setResultsMode] = useState(false); // Mode résultats (affichage un par un)
   const [currentResultIndex, setCurrentResultIndex] = useState(-1); // Index du résultat actuellement affiché
   const router = useRouter();
+  const hasCheckedLocalStorage = useRef(false); // Pour éviter les vérifications multiples du localStorage
   
   // États pour les modals
   const [modalState, setModalState] = useState<{
@@ -152,8 +153,15 @@ export default function Home() {
 
       // Vérifier que la session existe - ne pas permettre la création automatique
       if (!sessionDoc.exists()) {
-        showAlert('Erreur', 'Session introuvable. Vérifiez l\'ID de session.\n\nLes sessions doivent être créées depuis le panneau administrateur.');
+        showAlert(
+          'Session introuvable', 
+          `La session avec l'ID "${finalSessionId}" n'existe pas.\n\n` +
+          `Vérifiez que vous avez bien saisi l'ID de session correct.\n\n` +
+          `Les sessions doivent être créées depuis le panneau administrateur avant de pouvoir y rejoindre.`
+        );
         console.error('❌ Session introuvable:', finalSessionId);
+        // Réinitialiser les champs pour permettre une nouvelle tentative
+        setSessionIdInput('');
         return;
       }
 
@@ -284,9 +292,24 @@ export default function Home() {
       // Écouter les changements de session
       console.log('👂 Démarrage de l\'écoute pour la session:', finalSessionId);
       listenToSession(finalSessionId);
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Erreur lors de la connexion:', error);
-      showAlert('Erreur', 'Erreur lors de la connexion: ' + (error as Error).message);
+      
+      // Gestion d'erreur plus détaillée
+      let errorMessage = 'Une erreur est survenue lors de la connexion à la session.';
+      
+      if (error?.code === 'permission-denied') {
+        errorMessage = 'Vous n\'avez pas la permission d\'accéder à cette session.';
+      } else if (error?.code === 'unavailable') {
+        errorMessage = 'Le service est temporairement indisponible. Veuillez réessayer plus tard.';
+      } else if (error?.code === 'not-found') {
+        errorMessage = 'La session demandée n\'existe pas. Vérifiez l\'ID de session.';
+      } else if (error?.message) {
+        errorMessage = `Erreur: ${error.message}`;
+      }
+      
+      showAlert('Erreur de connexion', errorMessage);
+      // Ne pas réinitialiser les champs en cas d'erreur réseau pour permettre une nouvelle tentative
     }
   };
 
@@ -937,11 +960,17 @@ export default function Home() {
 
   // Vérifier si l'utilisateur est déjà connecté ou s'il y a un paramètre sessionId dans l'URL
   useEffect(() => {
+    // Ne vérifier qu'une seule fois au chargement initial
+    if (hasCheckedLocalStorage.current) {
+      return;
+    }
+    hasCheckedLocalStorage.current = true;
+
     // Vérifier d'abord les paramètres d'URL côté client
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const urlSessionId = urlParams.get('sessionId');
-      if (urlSessionId && !sessionId && !sessionIdInput) {
+      if (urlSessionId) {
         // Pré-remplir l'ID de session depuis l'URL
         setSessionIdInput(urlSessionId);
         // Nettoyer l'URL pour éviter les problèmes
@@ -949,17 +978,20 @@ export default function Home() {
       }
     }
 
+    // Vérifier le localStorage seulement au chargement initial
     const savedSessionId = localStorage.getItem('sessionId');
     const savedName = localStorage.getItem('participantName');
     const savedIsAdmin = localStorage.getItem('isAdmin') === 'true';
 
     if (savedSessionId && savedName) {
+      // Se reconnecter automatiquement seulement si on a des données sauvegardées
       setSessionId(savedSessionId);
       setName(savedName);
       setIsAdmin(savedIsAdmin);
       listenToSession(savedSessionId);
     }
-  }, [listenToSession, sessionId, sessionIdInput]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Tableau de dépendances vide pour ne s'exécuter qu'une seule fois au montage
 
   // Nettoyer le timer quand le composant est démonté
   useEffect(() => {

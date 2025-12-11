@@ -133,10 +133,19 @@ export default function EditSurvey() {
         return;
       }
 
+      // Vérifier si le JSON contient des "..." qui sont invalides
+      if (jsonInput.includes('...') && !jsonInput.includes('"..."')) {
+        showAlert('Erreur', 'Le JSON contient "..." qui n\'est pas valide. Remplacez "..." par la liste complète des éléments ou supprimez-le.');
+        return;
+      }
+
       let parsed: any;
+      let parseError: any = null;
       try {
         parsed = JSON.parse(jsonInput);
-      } catch (parseError) {
+      } catch (error) {
+        parseError = error;
+        // Essayer le format ligne par ligne uniquement si le JSON est vraiment invalide
         const lines = jsonInput.split('\n').filter((l: string) => l.trim());
         if (lines.length >= 5) {
           parsed = [];
@@ -155,9 +164,15 @@ export default function EditSurvey() {
             }
           }
         } else {
-          showAlert('Erreur', 'Format JSON invalide.');
+          showAlert('Erreur', `Format JSON invalide: ${parseError?.message || 'Erreur de parsing'}. Vérifiez que votre JSON est valide (pas de "..." dans les tableaux, guillemets corrects, virgules correctes).`);
           return;
         }
+      }
+
+      // Vérifier que parsed existe et est valide
+      if (!parsed) {
+        showAlert('Erreur', 'Impossible de parser le JSON. Vérifiez le format.');
+        return;
       }
 
       // Extraire les listes de réponses partagées si elles existent
@@ -165,7 +180,39 @@ export default function EditSurvey() {
 
       let questionsToAdd: Omit<Question, 'id'>[] = [];
 
-      if (Array.isArray(parsed)) {
+      // Priorité 1: Format avec sharedOptions et questions
+      if (parsed && parsed.questions && Array.isArray(parsed.questions)) {
+        questionsToAdd = parsed.questions
+          .filter((q: any) => q && (q.question || q.text))
+          .map((q: any) => {
+            const questionType = q.type || 'multiple-choice';
+            let options: string[] = [];
+            
+            // Si la question référence une liste partagée
+            if (q.optionsRef && sharedOptions[q.optionsRef]) {
+              options = sharedOptions[q.optionsRef];
+            } else if (q.optionsRef && !sharedOptions[q.optionsRef]) {
+              // Référence invalide
+              console.error(`Référence "${q.optionsRef}" non trouvée dans sharedOptions`);
+              options = [];
+            } else {
+              // Sinon, utiliser les options directement définies
+              options = q.options || q.choices || [];
+              if (!Array.isArray(options)) {
+                options = [];
+              }
+            }
+            
+            return {
+              question: q.question || q.text || '',
+              options: options,
+              type: questionType as 'multiple-choice' | 'ranking',
+              optionsRef: q.optionsRef || undefined,
+            };
+          });
+      }
+      // Priorité 2: Array de questions directement
+      else if (Array.isArray(parsed)) {
         questionsToAdd = parsed
           .filter((q: any) => q && (q.question || q.text))
           .map((q: any) => {
@@ -177,7 +224,10 @@ export default function EditSurvey() {
               options = sharedOptions[q.optionsRef];
             } else {
               // Sinon, utiliser les options directement définies
-              options = q.options || q.choices || (Array.isArray(q.options) ? q.options : ['', '', '', '']);
+              options = q.options || q.choices || [];
+              if (!Array.isArray(options)) {
+                options = [];
+              }
             }
             
             return {
@@ -187,29 +237,9 @@ export default function EditSurvey() {
               optionsRef: q.optionsRef || undefined,
             };
           });
-      } else if (parsed && parsed.questions && Array.isArray(parsed.questions)) {
-        questionsToAdd = parsed.questions
-          .filter((q: any) => q && (q.question || q.text))
-          .map((q: any) => {
-            const questionType = q.type || 'multiple-choice';
-            let options: string[] = [];
-            
-            // Si la question référence une liste partagée
-            if (q.optionsRef && sharedOptions[q.optionsRef]) {
-              options = sharedOptions[q.optionsRef];
-            } else {
-              // Sinon, utiliser les options directement définies
-              options = q.options || q.choices || (Array.isArray(q.options) ? q.options : ['', '', '', '']);
-            }
-            
-            return {
-              question: q.question || q.text || '',
-              options: options,
-              type: questionType as 'multiple-choice' | 'ranking',
-              optionsRef: q.optionsRef || undefined,
-            };
-          });
-      } else if (parsed && (parsed.question || parsed.text)) {
+      }
+      // Priorité 3: Objet unique avec une question
+      else if (parsed && (parsed.question || parsed.text)) {
         const questionType = parsed.type || 'multiple-choice';
         let options: string[] = [];
         
@@ -218,7 +248,10 @@ export default function EditSurvey() {
           options = sharedOptions[parsed.optionsRef];
         } else {
           // Sinon, utiliser les options directement définies
-          options = parsed.options || parsed.choices || ['', '', '', ''];
+          options = parsed.options || parsed.choices || [];
+          if (!Array.isArray(options)) {
+            options = [];
+          }
         }
         
         questionsToAdd = [{
@@ -252,7 +285,7 @@ export default function EditSurvey() {
       showAlert('Succès', `${questionsToAdd.length} question(s) importée(s) ! Utilisez le bouton "Sauvegarder" pour les enregistrer.`);
     } catch (error) {
       console.error('Erreur lors de l\'import JSON:', error);
-      showAlert('Erreur', 'Erreur lors de l\'import JSON. Vérifiez le format.');
+      showAlert('Erreur', `Erreur lors de l'import JSON: ${error instanceof Error ? error.message : 'Erreur inconnue'}. Vérifiez le format.`);
       setImportedQuestions([]);
     }
   };
@@ -536,7 +569,7 @@ export default function EditSurvey() {
                 <textarea
                   value={jsonInput}
                   onChange={(e) => setJsonInput(e.target.value)}
-                  placeholder={`Exemple avec listes partagées:\n{\n  "sharedOptions": {\n    "personnes": ["Alice", "Bob", "Charlie", "Diana", "Eve"],\n    "villes": ["Paris", "Lyon", "Marseille", "Nice"]\n  },\n  "questions": [\n    {\n      "question": "Qui préférez-vous ?",\n      "optionsRef": "personnes",\n      "type": "multiple-choice"\n    },\n    {\n      "question": "Classer ces personnes par préférence",\n      "optionsRef": "personnes",\n      "type": "ranking"\n    },\n    {\n      "question": "Quelle ville préférez-vous ?",\n      "optionsRef": "villes",\n      "type": "multiple-choice"\n    }\n  ]\n}\n\nExemple classique (sans listes partagées):\n[\n  {\n    "question": "Quelle est votre couleur préférée ?",\n    "options": ["Rouge", "Bleu", "Vert", "Jaune"],\n    "type": "multiple-choice"\n  },\n  {\n    "question": "Classer ces villes du nord au sud",\n    "options": ["Paris", "Lyon", "Marseille", "Nice"],\n    "type": "ranking"\n  }\n]`}
+                  placeholder={`Exemple avec listes partagées (IMPORTANT: pas de "..." dans le JSON):\n{\n  "sharedOptions": {\n    "personnes": ["Alice", "Bob", "Charlie", "Diana", "Eve"],\n    "villes": ["Paris", "Lyon", "Marseille", "Nice"]\n  },\n  "questions": [\n    {\n      "question": "Qui préférez-vous ?",\n      "optionsRef": "personnes",\n      "type": "multiple-choice"\n    },\n    {\n      "question": "Classer ces personnes par préférence",\n      "optionsRef": "personnes",\n      "type": "ranking"\n    },\n    {\n      "question": "Quelle ville préférez-vous ?",\n      "optionsRef": "villes",\n      "type": "multiple-choice"\n    }\n  ]\n}\n\nExemple classique (sans listes partagées):\n[\n  {\n    "question": "Quelle est votre couleur préférée ?",\n    "options": ["Rouge", "Bleu", "Vert", "Jaune"],\n    "type": "multiple-choice"\n  },\n  {\n    "question": "Classer ces villes du nord au sud",\n    "options": ["Paris", "Lyon", "Marseille", "Nice"],\n    "type": "ranking"\n  }\n]`}
                   style={{
                     width: '100%',
                     minHeight: '200px',
