@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -121,8 +121,20 @@ export default function Home() {
     }
   };
 
+  // Charger les résultats finaux
+  const loadFinalResults = useCallback(async (sid: string) => {
+    const participantsRef = collection(db, 'sessions', sid, 'participants');
+    const snapshot = await getDocs(participantsRef);
+    const parts: any[] = [];
+    snapshot.forEach((doc) => {
+      parts.push({ id: doc.id, ...doc.data() });
+    });
+    setResults(parts.sort((a, b) => b.score - a.score));
+    setShowResults(true);
+  }, []);
+
   // Écouter les changements de session
-  const listenToSession = (sid: string) => {
+  const listenToSession = useCallback((sid: string) => {
     const sessionRef = doc(db, 'sessions', sid);
     
     onSnapshot(sessionRef, async (snapshot) => {
@@ -163,19 +175,8 @@ export default function Home() {
       });
       setParticipants(parts.sort((a, b) => b.score - a.score));
     });
-  };
+  }, [name, loadFinalResults]);
 
-  // Charger les résultats finaux
-  const loadFinalResults = async (sid: string) => {
-    const participantsRef = collection(db, 'sessions', sid, 'participants');
-    const snapshot = await getDocs(participantsRef);
-    const parts: any[] = [];
-    snapshot.forEach((doc) => {
-      parts.push({ id: doc.id, ...doc.data() });
-    });
-    setResults(parts.sort((a, b) => b.score - a.score));
-    setShowResults(true);
-  };
 
   // Soumettre une réponse
   const handleSubmitAnswer = async () => {
@@ -244,7 +245,7 @@ export default function Home() {
       setIsAdmin(savedIsAdmin);
       listenToSession(savedSessionId);
     }
-  }, []);
+  }, [listenToSession]);
 
   // Écran de connexion
   if (!sessionId) {
@@ -344,7 +345,7 @@ export default function Home() {
 
       {isAdmin && (
         <div className="success">
-          Vous êtes l'administrateur. Vous pouvez contrôler le quiz.
+          Vous êtes l&apos;administrateur. Vous pouvez contrôler le quiz.
         </div>
       )}
 
