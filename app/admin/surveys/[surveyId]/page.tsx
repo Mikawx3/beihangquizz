@@ -23,7 +23,7 @@ interface Question {
   id: string;
   question: string;
   options: (string | Option)[]; // Supporte les strings simples (rétrocompatibilité) ou des objets Option
-  type?: 'multiple-choice' | 'ranking';
+  type?: 'multiple-choice' | 'ranking' | 'pairing';
   optionsRef?: string; // Référence à une liste partagée
 }
 
@@ -273,7 +273,7 @@ export default function EditSurvey() {
             return {
               question: q.question || q.text || '',
               options: options,
-              type: questionType as 'multiple-choice' | 'ranking',
+              type: questionType as 'multiple-choice' | 'ranking' | 'pairing',
               optionsRef: q.optionsRef || undefined,
             };
           });
@@ -289,7 +289,7 @@ export default function EditSurvey() {
             return {
               question: q.question || q.text || '',
               options: options,
-              type: questionType as 'multiple-choice' | 'ranking',
+              type: questionType as 'multiple-choice' | 'ranking' | 'pairing',
               optionsRef: q.optionsRef || undefined,
             };
           });
@@ -302,7 +302,7 @@ export default function EditSurvey() {
         questionsToAdd = [{
           question: parsed.question || parsed.text || '',
           options: options,
-          type: (questionType === 'ranking' ? 'ranking' : 'multiple-choice') as 'multiple-choice' | 'ranking',
+          type: (questionType === 'ranking' ? 'ranking' : questionType === 'pairing' ? 'pairing' : 'multiple-choice') as 'multiple-choice' | 'ranking' | 'pairing',
           optionsRef: parsed.optionsRef || undefined,
         }];
       }
@@ -605,6 +605,7 @@ export default function EditSurvey() {
                   <br /><strong>Types de questions disponibles :</strong>
                   <br />• <code>&quot;multiple-choice&quot;</code> : Choix multiple
                   <br />• <code>&quot;ranking&quot;</code> : Classement/Tri
+                  <br />• <code>&quot;pairing&quot;</code> : Association de couples (sélectionner deux personnes)
                   <br />
                   <br /><strong>Listes de réponses partagées :</strong>
                   <br />Vous pouvez définir des listes de réponses partagées dans <code>sharedOptions</code> et les référencer dans les questions avec <code>optionsRef</code>.
@@ -710,7 +711,7 @@ export default function EditSurvey() {
                         Question {index + 1}: {question.question}
                       </div>
                       <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
-                        Type: {question.type === 'ranking' ? 'Classement / Tri' : 'Choix multiple'}
+                        Type: {question.type === 'ranking' ? 'Classement / Tri' : question.type === 'pairing' ? 'Association de couples' : 'Choix multiple'}
                         {question.optionsRef && (
                           <span style={{ marginLeft: '10px', color: '#1976d2', fontWeight: '600' }}>
                             📎 Liste partagée: &quot;{question.optionsRef}&quot;
@@ -791,7 +792,7 @@ export default function EditSurvey() {
                 <select
                   value={newQuestion.type}
                   onChange={(e) => {
-                    const newType = e.target.value as 'multiple-choice' | 'ranking';
+                    const newType = e.target.value as 'multiple-choice' | 'ranking' | 'pairing';
                     setNewQuestion({ ...newQuestion, type: newType });
                     if (newType === 'ranking') {
                       const initialOrder = newQuestion.options.map((_, index) => index);
@@ -811,6 +812,7 @@ export default function EditSurvey() {
                 >
                   <option value="multiple-choice">Choix multiple</option>
                   <option value="ranking">Classement / Tri</option>
+                  <option value="pairing">Association de couples</option>
                 </select>
                 <input
                   type="text"
@@ -879,6 +881,102 @@ export default function EditSurvey() {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+                {newQuestion.type === 'pairing' && (
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '10px', fontWeight: '600' }}>
+                      Options disponibles (les participants pourront sélectionner deux personnes parmi cette liste) :
+                    </label>
+                    {newQuestion.options.map((option, index) => {
+                      const opt = normalizeOption(option);
+                      return (
+                        <div key={index} style={{ marginBottom: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '5px' }}>
+                            <span style={{ width: '20px', textAlign: 'center', color: '#999' }}>{index + 1}.</span>
+                            <input
+                              type="text"
+                              placeholder={`Option ${index + 1}`}
+                              value={opt.text}
+                              onChange={(e) => {
+                                const newOptions = [...newQuestion.options];
+                                const currentOpt = normalizeOption(newOptions[index]);
+                                newOptions[index] = { ...currentOpt, text: e.target.value };
+                                setNewQuestion({ ...newQuestion, options: newOptions });
+                              }}
+                              style={{
+                                flex: 1,
+                                padding: '10px',
+                                border: '2px solid #e0e0e0',
+                                borderRadius: '8px',
+                                fontSize: '14px'
+                              }}
+                            />
+                          </div>
+                          <div style={{ marginLeft: '30px', marginTop: '5px' }}>
+                            <input
+                              type="text"
+                              placeholder="Image (optionnel)"
+                              value={opt.image || ''}
+                              onChange={(e) => {
+                                const newOptions = [...newQuestion.options];
+                                const currentOpt = normalizeOption(newOptions[index]);
+                                newOptions[index] = { ...currentOpt, image: e.target.value || undefined };
+                                setNewQuestion({ ...newQuestion, options: newOptions });
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '8px',
+                                border: '1px solid #e0e0e0',
+                                borderRadius: '6px',
+                                fontSize: '12px'
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newOptions = [...newQuestion.options, { text: '' }];
+                        setNewQuestion({ ...newQuestion, options: newOptions });
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        background: '#e3f2fd',
+                        color: '#1976d2',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        marginRight: '10px',
+                        marginTop: '10px'
+                      }}
+                    >
+                      + Ajouter une option
+                    </button>
+                    {newQuestion.options.length > 2 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newOptions = newQuestion.options.slice(0, -1);
+                          setNewQuestion({ ...newQuestion, options: newOptions });
+                        }}
+                        style={{
+                          padding: '8px 16px',
+                          background: '#ffebee',
+                          color: '#c62828',
+                          border: 'none',
+                          borderRadius: '6px',
+                          fontSize: '14px',
+                          cursor: 'pointer',
+                          marginTop: '10px'
+                        }}
+                      >
+                        - Supprimer la dernière option
+                      </button>
+                    )}
                   </div>
                 )}
                 {newQuestion.type === 'ranking' && (
@@ -1096,6 +1194,32 @@ export default function EditSurvey() {
                                   </div>
                                 );
                               })}
+                            </div>
+                          )}
+                          {question.type === 'pairing' && (
+                            <div style={{ marginLeft: '20px' }}>
+                              <p style={{ fontSize: '14px', color: '#666', marginBottom: '10px', fontStyle: 'italic' }}>
+                                Type: Association de couples
+                              </p>
+                              <div>
+                                {question.options.map((option, index) => {
+                                  const opt = normalizeOption(option);
+                                  return (
+                                    <div
+                                      key={index}
+                                      style={{
+                                        padding: '8px',
+                                        margin: '5px 0',
+                                        background: 'white',
+                                        borderRadius: '5px',
+                                        border: '1px solid #e0e0e0'
+                                      }}
+                                    >
+                                      {index + 1}. {opt.text}
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
                           {question.type === 'ranking' && (

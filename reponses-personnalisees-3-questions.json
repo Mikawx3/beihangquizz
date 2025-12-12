@@ -1,0 +1,91 @@
+{
+  "sharedOptions": {
+    "personnes": [
+      {
+        "text": "enora",
+        "image": "/images/pied.png"
+      },
+      {
+        "text": "kamelia",
+        "image": "/images/caca.png"
+      },
+      {
+        "text": "dejan",
+        "image": "/images/boule-de-cristal.png"
+      },
+      {
+        "text": "mikail",
+        "image": "/images/doliprane.png"
+      },
+      {
+        "text": "nathan",
+        "image": "/images/scooby.png"
+      },
+      {
+        "text": "robin",
+        "image": "/images/mur-escalade.png"
+      },
+      {
+        "text": "paul",
+        "image": "/images/avion.png"
+      },
+      {
+        "text": "clément",
+        "image": "/images/telephone.png"
+      },
+      {
+        "text": "aïman",
+        "image": "/images/sac-poubelle.png"
+      },
+      {
+        "text": "moha",
+        "image": "/images/drapeau-lgbt.png"
+      },
+      {
+        "text": "bastien",
+        "image": "/images/coinche.png"
+      },
+      {
+        "text": "margot",
+        "image": "/images/camera.png"
+      },
+      {
+        "text": "romane",
+        "image": "/images/choucroute.png"
+      },
+      {
+        "text": "mathieu",
+        "image": "/images/chaussure-course.png"
+      },
+      {
+        "text": "loïc",
+        "image": "/images/lit.png"
+      },
+      {
+        "text": "victorian",
+        "image": "/images/biere.png"
+      },
+      {
+        "text": "guillaume",
+        "image": "/images/altere.png"
+      }
+    ]
+  },
+  "questions": [
+    {
+      "question": "Qui a la vision ?",
+      "optionsRef": "personnes",
+      "type": "multiple-choice"
+    },
+    {
+      "question": "Qui de nous est le plus fort à la bagarre",
+      "optionsRef": "personnes",
+      "type": "ranking"
+    },
+    {
+      "question": "Qui s'aime le plus?",
+      "optionsRef": "personnes",
+      "type": "pairing"
+    }
+  ]
+}

@@ -52,6 +52,8 @@ export default function Home() {
   const [currentQuestion, setCurrentQuestion] = useState<any>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [rankingOrder, setRankingOrder] = useState<number[]>([]); // Ordre pour les questions de type ranking
+  const [pairingSelection, setPairingSelection] = useState<Array<[number, number]>>([]); // Couples sélectionnés pour les questions de type pairing
+  const [pairingTempSelection, setPairingTempSelection] = useState<number | null>(null); // Première personne sélectionnée temporairement pour créer un couple
   const [hasAnswered, setHasAnswered] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [results, setResults] = useState<any[]>([]);
@@ -66,6 +68,7 @@ export default function Home() {
     question: string;
     winnerName: string;
     winnerImage?: string;
+    winnerImage2?: string; // Pour les couples (pairing)
     allOptions?: (string | Option)[];
   } | null>(null);
   const [lastAnimatedResultIndex, setLastAnimatedResultIndex] = useState<number>(-1); // Pour éviter de rejouer l'animation pour le même résultat
@@ -434,6 +437,38 @@ export default function Home() {
               count: positions.length
             };
           });
+        } else if (question.type === 'pairing') {
+          // Pour pairing, compter tous les couples de tous les participants
+          const coupleVotes: { [key: string]: number } = {};
+          
+          results.forEach((participant: any) => {
+            if (participant && participant.answers && typeof participant.answers === 'object') {
+              const answer = participant.answers[questionIndex];
+              if (answer !== undefined && answer !== null && Array.isArray(answer)) {
+                if (answer.length > 0 && answer.length % 2 === 0) {
+                  // Format nouveau : tableau plat [a, b, c, d, ...] où chaque paire est un couple
+                  stats.totalVotes++;
+                  for (let i = 0; i < answer.length; i += 2) {
+                    if (i + 1 < answer.length) {
+                      const [first, second] = answer[i] < answer[i + 1] 
+                        ? [answer[i], answer[i + 1]] 
+                        : [answer[i + 1], answer[i]];
+                      const coupleKey = `${first},${second}`;
+                      coupleVotes[coupleKey] = (coupleVotes[coupleKey] || 0) + 1;
+                    }
+                  }
+                } else if (answer.length === 2 && typeof answer[0] === 'number') {
+                  // Format ancien : un seul couple [a, b] (compatibilité)
+                  stats.totalVotes++;
+                  const [first, second] = answer[0] < answer[1] ? [answer[0], answer[1]] : [answer[1], answer[0]];
+                  const coupleKey = `${first},${second}`;
+                  coupleVotes[coupleKey] = (coupleVotes[coupleKey] || 0) + 1;
+                }
+              }
+            }
+          });
+          
+          stats.coupleVotes = coupleVotes;
         } else {
           // Pour multiple-choice
           results.forEach((participant: any) => {
@@ -491,6 +526,15 @@ export default function Home() {
           setRankingOrder([]);
         }
         
+        // Initialiser la sélection pour les questions de type pairing
+        if (question.type === 'pairing') {
+          setPairingSelection([]);
+          setPairingTempSelection(null);
+        } else {
+          setPairingSelection([]);
+          setPairingTempSelection(null);
+        }
+        
         // Vérifier si l'utilisateur a déjà répondu
         if (name && name.trim() !== '') {
           const participantRef = doc(db, 'sessions', sid, 'participants', name);
@@ -502,7 +546,22 @@ export default function Home() {
                 setHasAnswered(true);
                 if (question.type === 'ranking' && Array.isArray(answers[questionIndex])) {
                   setRankingOrder(answers[questionIndex]);
-                } else {
+                                } else if (question.type === 'pairing' && Array.isArray(answers[questionIndex])) {
+                                  // Charger les couples existants
+                                  const couples = answers[questionIndex];
+                                  if (Array.isArray(couples) && couples.length > 0) {
+                                    // Format nouveau : tableau plat [a, b, c, d, ...] où chaque paire est un couple
+                                    if (couples.length >= 2 && typeof couples[0] === 'number') {
+                                      const loadedCouples: Array<[number, number]> = [];
+                                      for (let i = 0; i < couples.length; i += 2) {
+                                        if (i + 1 < couples.length) {
+                                          loadedCouples.push([couples[i], couples[i + 1]]);
+                                        }
+                                      }
+                                      setPairingSelection(loadedCouples);
+                                    }
+                                  }
+                                } else {
                   setSelectedAnswer(answers[questionIndex]);
                 }
               } else {
@@ -511,6 +570,9 @@ export default function Home() {
                 if (question.type === 'ranking') {
                   const initialOrder = question.options.map((_: any, index: number) => index);
                   setRankingOrder(initialOrder);
+                } else if (question.type === 'pairing') {
+                  setPairingSelection([]);
+                  setPairingTempSelection(null);
                 }
               }
             }
@@ -583,6 +645,12 @@ export default function Home() {
         // Mettre à jour l'index du résultat affiché - utiliser loadedQuestions au lieu de questions car l'état React n'est pas encore mis à jour
         if (loadedQuestions.length > 0) {
           if (resultIndex >= 0 && resultIndex < loadedQuestions.length) {
+            // Si le résultat change, réinitialiser l'animation
+            if (resultIndex !== currentResultIndex) {
+              setShowRevealAnimation(false);
+              setRevealAnimationData(null);
+              setLastAnimatedResultIndex(-1);
+            }
             setCurrentResultIndex(resultIndex);
           } else if (resultIndex === -1 || resultIndex < 0) {
             // Initialiser à 0 si pas encore défini (seulement si admin)
@@ -595,6 +663,12 @@ export default function Home() {
           // Si les questions ne sont pas encore chargées, définir quand même currentResultIndex avec la valeur de Firestore
           // Cela évite que currentResultIndex reste à -1 pendant le chargement
           if (resultIndex >= 0) {
+            // Si le résultat change, réinitialiser l'animation
+            if (resultIndex !== currentResultIndex) {
+              setShowRevealAnimation(false);
+              setRevealAnimationData(null);
+              setLastAnimatedResultIndex(-1);
+            }
             setCurrentResultIndex(resultIndex);
           } else {
             // Initialiser à 0 si pas encore défini (seulement si admin)
@@ -730,58 +804,128 @@ export default function Home() {
     return calculateQuestionStats();
   }, [showResults, calculateQuestionStats]);
 
-  // Détecter le gagnant et déclencher l'animation pour les questions multiple-choice
+  // Détecter le gagnant et déclencher l'animation pour les questions multiple-choice, ranking et pairing
   useEffect(() => {
     if (!showResults || !resultsMode || currentResultIndex < 0 || !questionStats || questionStats.length === 0) {
       return;
     }
 
-    // Ne pas déclencher l'animation si elle est déjà en cours ou si on a déjà animé ce résultat
-    if (showRevealAnimation || lastAnimatedResultIndex === currentResultIndex) {
+    // Ne pas déclencher l'animation si elle est déjà en cours
+    if (showRevealAnimation) {
+      return;
+    }
+
+    // Ne pas déclencher l'animation si on a déjà animé ce résultat
+    if (lastAnimatedResultIndex === currentResultIndex) {
       return;
     }
 
     const currentStat = questionStats[currentResultIndex];
-    if (!currentStat || currentStat.type !== 'multiple-choice') {
-      // Pour les questions de type ranking, ne pas afficher d'animation
+    if (!currentStat) {
       return;
     }
 
-    // Trouver le gagnant (option avec le plus de votes)
-    const sortedOptions = Object.keys(currentStat.votes)
-      .map(optIdx => parseInt(optIdx))
-      .sort((a, b) => {
-        const votesA = currentStat.votes[a] || 0;
-        const votesB = currentStat.votes[b] || 0;
-        return votesB - votesA;
-      });
+    let winnerName = '';
+    let winnerImage: string | undefined = undefined;
+    let winnerImage2: string | undefined = undefined; // Pour les couples
 
-    if (sortedOptions.length === 0) {
-      return;
+    if (currentStat.type === 'multiple-choice') {
+      // Trouver le gagnant (option avec le plus de votes)
+      const sortedOptions = Object.keys(currentStat.votes)
+        .map(optIdx => parseInt(optIdx))
+        .sort((a, b) => {
+          const votesA = currentStat.votes[a] || 0;
+          const votesB = currentStat.votes[b] || 0;
+          return votesB - votesA;
+        });
+
+      if (sortedOptions.length === 0) {
+        return;
+      }
+
+      const winnerIndex = sortedOptions[0];
+      const winnerVotes = currentStat.votes[winnerIndex] || 0;
+      
+      // Vérifier s'il y a un gagnant unique (pas d'égalité)
+      const secondPlaceVotes = sortedOptions.length > 1 ? (currentStat.votes[sortedOptions[1]] || 0) : 0;
+      
+      if (winnerVotes > secondPlaceVotes && winnerVotes > 0) {
+        const winnerOption = currentStat.options[winnerIndex];
+        winnerName = getOptionText(winnerOption);
+        winnerImage = getOptionImage(winnerOption);
+      }
+    } else if (currentStat.type === 'ranking') {
+      // Trouver le meilleur classé (première position moyenne)
+      if (currentStat.rankingAverages && Object.keys(currentStat.rankingAverages).length > 0) {
+        const sortedOptions = Object.keys(currentStat.rankingAverages)
+          .map(optIdx => parseInt(optIdx))
+          .sort((a, b) => {
+            const avgA = currentStat.rankingAverages[a]?.average ?? Infinity;
+            const avgB = currentStat.rankingAverages[b]?.average ?? Infinity;
+            return avgA - avgB;
+          });
+
+        if (sortedOptions.length > 0) {
+          const winnerIndex = sortedOptions[0];
+          const avgData = currentStat.rankingAverages[winnerIndex];
+          if (avgData && avgData.count > 0) {
+            const winnerOption = currentStat.options[winnerIndex];
+            winnerName = getOptionText(winnerOption);
+            winnerImage = getOptionImage(winnerOption);
+          }
+        }
+      }
+    } else if (currentStat.type === 'pairing') {
+      // Trouver le meilleur couple
+      if (currentStat.coupleVotes && Object.keys(currentStat.coupleVotes).length > 0) {
+        const sortedCouples = Object.entries(currentStat.coupleVotes)
+          .map(([key, votes]) => [key, votes as number] as [string, number])
+          .sort(([, votesA], [, votesB]) => votesB - votesA);
+
+        if (sortedCouples.length > 0) {
+          const [coupleKey, votes] = sortedCouples[0];
+          if (votes > 0) {
+            const [firstIdx, secondIdx] = coupleKey.split(',').map(Number);
+            const firstOption = currentStat.options[firstIdx];
+            const secondOption = currentStat.options[secondIdx];
+            winnerName = `${getOptionText(firstOption)} & ${getOptionText(secondOption)}`;
+            winnerImage = getOptionImage(firstOption);
+            winnerImage2 = getOptionImage(secondOption);
+          }
+        }
+      }
     }
 
-    const winnerIndex = sortedOptions[0];
-    const winnerVotes = currentStat.votes[winnerIndex] || 0;
-    
-    // Vérifier s'il y a un gagnant unique (pas d'égalité)
-    const secondPlaceVotes = sortedOptions.length > 1 ? (currentStat.votes[sortedOptions[1]] || 0) : 0;
-    
-    if (winnerVotes > secondPlaceVotes && winnerVotes > 0) {
-      const winnerOption = currentStat.options[winnerIndex];
-      const winnerName = getOptionText(winnerOption);
-      const winnerImage = getOptionImage(winnerOption);
-
-      // Déclencher l'animation pour ce nouveau résultat
-      setRevealAnimationData({
-        question: currentStat.question,
-        winnerName,
-        winnerImage,
-        allOptions: currentStat.options || [],
-      });
-      setShowRevealAnimation(true);
-      setLastAnimatedResultIndex(currentResultIndex);
+    // Vérifier qu'on a un gagnant et que l'index n'a pas changé entre-temps
+    if (winnerName && currentResultIndex >= 0 && currentResultIndex < questionStats.length) {
+      // Double vérification : s'assurer que le résultat correspond toujours
+      const verifyStat = questionStats[currentResultIndex];
+      if (verifyStat && verifyStat.question === currentStat.question) {
+        // Déclencher l'animation pour ce nouveau résultat
+        setRevealAnimationData({
+          question: currentStat.question,
+          winnerName,
+          winnerImage,
+          winnerImage2,
+          allOptions: undefined, // Ne pas passer toutes les options, seulement le gagnant
+        });
+        setShowRevealAnimation(true);
+        setLastAnimatedResultIndex(currentResultIndex);
+      }
     }
   }, [showResults, resultsMode, currentResultIndex, questionStats, showRevealAnimation, lastAnimatedResultIndex]);
+
+  // Annuler l'animation si le résultat change pendant qu'elle est en cours
+  useEffect(() => {
+    if (showRevealAnimation && revealAnimationData) {
+      // Vérifier que l'animation correspond toujours au résultat actuel
+      if (lastAnimatedResultIndex !== currentResultIndex) {
+        console.log('⚠️ Résultat changé pendant l\'animation, annulation de l\'animation');
+        setShowRevealAnimation(false);
+        setRevealAnimationData(null);
+      }
+    }
+  }, [currentResultIndex, showRevealAnimation, revealAnimationData, lastAnimatedResultIndex]);
 
   // Fonction pour passer au résultat suivant (admin seulement)
   const handleNextResult = async () => {
@@ -805,10 +949,13 @@ export default function Home() {
         return;
       }
       
-      // Réinitialiser l'animation pour qu'elle se rejoue pour le nouveau résultat
+      // Réinitialiser complètement l'animation pour qu'elle se rejoue pour le nouveau résultat
       setShowRevealAnimation(false);
       setRevealAnimationData(null);
       setLastAnimatedResultIndex(-1); // Réinitialiser pour permettre l'animation du nouveau résultat
+      
+      // Attendre un peu pour que React nettoie complètement le composant précédent
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       await updateDoc(sessionRef, {
         currentResultIndex: nextResultIdx,
@@ -842,10 +989,13 @@ export default function Home() {
         return;
       }
       
-      // Réinitialiser l'animation pour qu'elle se rejoue pour le résultat précédent
+      // Réinitialiser complètement l'animation pour qu'elle se rejoue pour le résultat précédent
       setShowRevealAnimation(false);
       setRevealAnimationData(null);
       setLastAnimatedResultIndex(-1); // Réinitialiser pour permettre l'animation du résultat précédent
+      
+      // Attendre un peu pour que React nettoie complètement le composant précédent
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       await updateDoc(sessionRef, {
         currentResultIndex: previousResultIdx,
@@ -873,6 +1023,33 @@ export default function Home() {
         alert('Veuillez classer toutes les options');
         return;
       }
+    } else if (currentQuestion.type === 'pairing') {
+      // Pour pairing, on doit avoir créé au moins un couple
+      // On vérifie que toutes les personnes sont associées (ou presque, si impair)
+      const usedIndices = new Set<number>();
+      pairingSelection.forEach(([a, b]) => {
+        usedIndices.add(a);
+        usedIndices.add(b);
+      });
+      // On accepte même si toutes les personnes ne sont pas associées (nombre impair)
+      if (pairingSelection.length === 0) {
+        alert('Veuillez créer au moins un couple en associant les personnes');
+        return;
+      }
+      // Vérifier qu'on n'a pas de doublons dans les couples
+      const seenCouples = new Set<string>();
+      for (const [a, b] of pairingSelection) {
+        const coupleKey = a < b ? `${a},${b}` : `${b},${a}`;
+        if (seenCouples.has(coupleKey)) {
+          alert('Vous avez créé un couple en double. Veuillez corriger.');
+          return;
+        }
+        seenCouples.add(coupleKey);
+        if (a === b) {
+          alert('Un couple ne peut pas être formé de la même personne deux fois.');
+          return;
+        }
+      }
     } else {
       if (selectedAnswer === null) return;
     }
@@ -891,7 +1068,18 @@ export default function Home() {
       const currentScore = currentData?.score || 0;
 
       const questionIndex = currentQuestion.id - 1;
-      const answer = currentQuestion.type === 'ranking' ? rankingOrder : selectedAnswer;
+      let answer: any;
+      if (currentQuestion.type === 'ranking') {
+        answer = rankingOrder;
+      } else if (currentQuestion.type === 'pairing') {
+        // Stocker tous les couples comme tableau plat [index1, index2, index3, index4, ...]
+        // Firestore ne supporte pas les tableaux imbriqués, donc on utilise un tableau plat
+        answer = pairingSelection.flatMap(([a, b]) => {
+          return a < b ? [a, b] : [b, a];
+        });
+      } else {
+        answer = selectedAnswer;
+      }
       answers[questionIndex] = answer;
 
       // Pas de scoring pour les sondages
@@ -1380,16 +1568,20 @@ export default function Home() {
   // Écran de résultats finaux
   if (showResults) {
     // Afficher l'animation de révélation si nécessaire
-    if (showRevealAnimation && revealAnimationData) {
+    // Vérifier que l'animation correspond bien au résultat actuel
+    if (showRevealAnimation && revealAnimationData && lastAnimatedResultIndex === currentResultIndex) {
       return (
         <RevealAnimation
+          key={`reveal-${currentResultIndex}-${revealAnimationData.winnerName}`} // Clé unique pour forcer le remontage complet
           question={revealAnimationData.question}
           winnerName={revealAnimationData.winnerName}
           winnerImage={revealAnimationData.winnerImage}
+          winnerImage2={revealAnimationData.winnerImage2}
           allOptions={revealAnimationData.allOptions}
           onComplete={() => {
             setShowRevealAnimation(false);
             setRevealAnimationData(null);
+            // Ne pas réinitialiser lastAnimatedResultIndex ici car on veut éviter de relancer l'animation pour ce résultat
           }}
         />
       );
@@ -1586,6 +1778,144 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+              ) : currentStat.type === 'pairing' ? (
+                <div>
+                  <p style={{ color: '#666', marginBottom: '20px', fontSize: '16px', fontWeight: '600' }}>
+                    Réponses reçues: {currentStat.totalVotes}
+                  </p>
+                  {currentStat.coupleVotes && Object.keys(currentStat.coupleVotes).length > 0 ? (
+                    <div>
+                      {Object.entries(currentStat.coupleVotes)
+                        .map(([coupleKey, votes]: [string, any]) => {
+                          const [firstIndex, secondIndex] = coupleKey.split(',').map(Number);
+                          return {
+                            coupleKey,
+                            firstIndex,
+                            secondIndex,
+                            votes: votes as number
+                          };
+                        })
+                        .sort((a, b) => b.votes - a.votes)
+                        .map((couple, rankIndex) => {
+                          const firstOption = currentStat.options[couple.firstIndex];
+                          const secondOption = currentStat.options[couple.secondIndex];
+                          const firstText = getOptionText(firstOption);
+                          const secondText = getOptionText(secondOption);
+                          const isTopThree = rankIndex < 3;
+                          const percentage = currentStat.totalVotes > 0 ? (couple.votes / currentStat.totalVotes) * 100 : 0;
+                          
+                          const getRankColor = (rank: number) => {
+                            if (rank === 0) return 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)';
+                            if (rank === 1) return 'linear-gradient(135deg, #C0C0C0 0%, #A0A0A0 100%)';
+                            if (rank === 2) return 'linear-gradient(135deg, #CD7F32 0%, #B8860B 100%)';
+                            return 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                          };
+                          
+                          const getRankEmoji = (rank: number) => {
+                            if (rank === 0) return '🥇';
+                            if (rank === 1) return '🥈';
+                            if (rank === 2) return '🥉';
+                            return `${rank + 1}.`;
+                          };
+                          
+                          return (
+                            <div 
+                              key={couple.coupleKey} 
+                              style={{ 
+                                marginBottom: isTopThree ? '20px' : '15px',
+                                padding: isTopThree ? '18px' : '15px',
+                                background: isTopThree ? '#f9f9f9' : 'white',
+                                borderRadius: '12px',
+                                border: isTopThree ? `3px solid ${rankIndex === 0 ? '#FFD700' : rankIndex === 1 ? '#C0C0C0' : '#CD7F32'}` : '1px solid #e0e0e0',
+                                boxShadow: isTopThree ? '0 4px 12px rgba(0,0,0,0.1)' : '0 2px 4px rgba(0,0,0,0.05)',
+                              }}
+                            >
+                              <div style={{ 
+                                display: 'flex', 
+                                justifyContent: 'space-between', 
+                                alignItems: 'center',
+                                marginBottom: '12px'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                                  <span style={{ 
+                                    fontSize: isTopThree ? '24px' : '18px',
+                                    fontWeight: '600',
+                                    minWidth: '35px',
+                                    textAlign: 'center'
+                                  }}>
+                                    {getRankEmoji(rankIndex)}
+                                  </span>
+                                  <span style={{ 
+                                    fontWeight: isTopThree ? '600' : '500',
+                                    fontSize: isTopThree ? '16px' : '15px',
+                                    color: '#333'
+                                  }}>
+                                    {firstText} & {secondText}
+                                  </span>
+                                </div>
+                                <div style={{ 
+                                  textAlign: 'right',
+                                  marginLeft: '15px'
+                                }}>
+                                  <div style={{ 
+                                    fontWeight: '700', 
+                                    color: isTopThree ? '#667eea' : '#555',
+                                    fontSize: isTopThree ? '20px' : '18px'
+                                  }}>
+                                    {couple.votes} vote{couple.votes !== 1 ? 's' : ''}
+                                  </div>
+                                  <div style={{ 
+                                    fontSize: '14px',
+                                    color: '#999',
+                                    marginTop: '2px'
+                                  }}>
+                                    {percentage.toFixed(1)}%
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div style={{
+                                width: '100%',
+                                height: isTopThree ? '40px' : '35px',
+                                background: '#e0e0e0',
+                                borderRadius: '20px',
+                                overflow: 'hidden',
+                                position: 'relative',
+                                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
+                              }}>
+                                <div
+                                  style={{
+                                    width: `${percentage}%`,
+                                    height: '100%',
+                                    background: getRankColor(rankIndex),
+                                    transition: 'width 0.8s ease',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'flex-end',
+                                    paddingRight: percentage > 8 ? '15px' : '5px',
+                                    color: 'white',
+                                    fontSize: isTopThree ? '14px' : '12px',
+                                    fontWeight: '700',
+                                    boxShadow: isTopThree ? '0 2px 8px rgba(0,0,0,0.2)' : 'none',
+                                  }}
+                                >
+                                  {percentage > 8 && (
+                                    <span style={{ textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>
+                                      {percentage.toFixed(0)}%
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '14px', color: '#999', fontStyle: 'italic' }}>
+                      Aucun couple n&apos;a été sélectionné.
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div>
                   <div style={{ 
@@ -1735,6 +2065,61 @@ export default function Home() {
               fontSize: '16px'
             }}>
               Chargement des résultats...
+            </div>
+          )}
+          
+          {/* Boutons pour quitter et faire un nouveau sondage à la fin du dernier résultat */}
+          {currentResultIndex >= questions.length - 1 && (
+            <div style={{
+              marginTop: '40px',
+              padding: '30px',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: '15px',
+              textAlign: 'center',
+              boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)'
+            }}>
+              <h2 style={{ color: 'white', marginBottom: '20px', fontSize: '24px' }}>
+                🎉 Tous les résultats ont été affichés !
+              </h2>
+              <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button
+                  onClick={handleLeaveSession}
+                  className="button"
+                  style={{
+                    background: 'white',
+                    color: '#667eea',
+                    fontSize: '16px',
+                    padding: '15px 30px',
+                    fontWeight: '600',
+                    border: 'none',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 10px rgba(0, 0, 0, 0.2)'
+                  }}
+                >
+                  🚪 Quitter la session
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.clear();
+                    window.location.reload();
+                  }}
+                  className="button"
+                  style={{
+                    background: 'white',
+                    color: '#764ba2',
+                    fontSize: '16px',
+                    padding: '15px 30px',
+                    fontWeight: '600',
+                    border: 'none',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 10px rgba(0, 0, 0, 0.2)'
+                  }}
+                >
+                  🔄 Nouveau Sondage
+                </button>
+              </div>
             </div>
           )}
 
@@ -1926,6 +2311,144 @@ export default function Home() {
                   ) : (
                     <div style={{ fontSize: '14px', color: '#999', fontStyle: 'italic' }}>
                       Aucune option disponible.
+                    </div>
+                  )}
+                </div>
+              ) : stat.type === 'pairing' ? (
+                <div>
+                  <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>
+                    Réponses reçues: {stat.totalVotes}
+                  </p>
+                  {stat.coupleVotes && Object.keys(stat.coupleVotes).length > 0 ? (
+                    <div>
+                      {Object.entries(stat.coupleVotes)
+                        .map(([coupleKey, votes]: [string, any]) => {
+                          const [firstIndex, secondIndex] = coupleKey.split(',').map(Number);
+                          return {
+                            coupleKey,
+                            firstIndex,
+                            secondIndex,
+                            votes: votes as number
+                          };
+                        })
+                        .sort((a, b) => b.votes - a.votes)
+                        .map((couple, rankIndex) => {
+                          const firstOption = stat.options[couple.firstIndex];
+                          const secondOption = stat.options[couple.secondIndex];
+                          const firstText = getOptionText(firstOption);
+                          const secondText = getOptionText(secondOption);
+                          const isTopThree = rankIndex < 3;
+                          const percentage = stat.totalVotes > 0 ? (couple.votes / stat.totalVotes) * 100 : 0;
+                          
+                          const getRankColor = (rank: number) => {
+                            if (rank === 0) return 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)';
+                            if (rank === 1) return 'linear-gradient(135deg, #C0C0C0 0%, #A0A0A0 100%)';
+                            if (rank === 2) return 'linear-gradient(135deg, #CD7F32 0%, #B8860B 100%)';
+                            return 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                          };
+                          
+                          const getRankEmoji = (rank: number) => {
+                            if (rank === 0) return '🥇';
+                            if (rank === 1) return '🥈';
+                            if (rank === 2) return '🥉';
+                            return `${rank + 1}.`;
+                          };
+                          
+                          return (
+                            <div 
+                              key={couple.coupleKey} 
+                              style={{ 
+                                marginBottom: isTopThree ? '20px' : '15px',
+                                padding: isTopThree ? '18px' : '15px',
+                                background: isTopThree ? '#f9f9f9' : 'white',
+                                borderRadius: '12px',
+                                border: isTopThree ? `3px solid ${rankIndex === 0 ? '#FFD700' : rankIndex === 1 ? '#C0C0C0' : '#CD7F32'}` : '1px solid #e0e0e0',
+                                boxShadow: isTopThree ? '0 4px 12px rgba(0,0,0,0.1)' : '0 2px 4px rgba(0,0,0,0.05)',
+                              }}
+                            >
+                              <div style={{ 
+                                display: 'flex', 
+                                justifyContent: 'space-between', 
+                                alignItems: 'center',
+                                marginBottom: '12px'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                                  <span style={{ 
+                                    fontSize: isTopThree ? '24px' : '18px',
+                                    fontWeight: '600',
+                                    minWidth: '35px',
+                                    textAlign: 'center'
+                                  }}>
+                                    {getRankEmoji(rankIndex)}
+                                  </span>
+                                  <span style={{ 
+                                    fontWeight: isTopThree ? '600' : '500',
+                                    fontSize: isTopThree ? '16px' : '15px',
+                                    color: '#333'
+                                  }}>
+                                    {firstText} & {secondText}
+                                  </span>
+                                </div>
+                                <div style={{ 
+                                  textAlign: 'right',
+                                  marginLeft: '15px'
+                                }}>
+                                  <div style={{ 
+                                    fontWeight: '700', 
+                                    color: isTopThree ? '#667eea' : '#555',
+                                    fontSize: isTopThree ? '20px' : '18px'
+                                  }}>
+                                    {couple.votes} vote{couple.votes !== 1 ? 's' : ''}
+                                  </div>
+                                  <div style={{ 
+                                    fontSize: '14px',
+                                    color: '#999',
+                                    marginTop: '2px'
+                                  }}>
+                                    {percentage.toFixed(1)}%
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div style={{
+                                width: '100%',
+                                height: isTopThree ? '40px' : '35px',
+                                background: '#e0e0e0',
+                                borderRadius: '20px',
+                                overflow: 'hidden',
+                                position: 'relative',
+                                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
+                              }}>
+                                <div
+                                  style={{
+                                    width: `${percentage}%`,
+                                    height: '100%',
+                                    background: getRankColor(rankIndex),
+                                    transition: 'width 0.8s ease',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'flex-end',
+                                    paddingRight: percentage > 8 ? '15px' : '5px',
+                                    color: 'white',
+                                    fontSize: isTopThree ? '14px' : '12px',
+                                    fontWeight: '700',
+                                    boxShadow: isTopThree ? '0 2px 8px rgba(0,0,0,0.2)' : 'none',
+                                  }}
+                                >
+                                  {percentage > 8 && (
+                                    <span style={{ textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>
+                                      {percentage.toFixed(0)}%
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '14px', color: '#999', fontStyle: 'italic' }}>
+                      Aucun couple n&apos;a été sélectionné.
                     </div>
                   )}
                 </div>
@@ -2317,6 +2840,133 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+            ) : currentQuestion.type === 'pairing' ? (
+              <div>
+                <p style={{ fontSize: '14px', color: '#666', marginBottom: '20px', fontStyle: 'italic' }}>
+                  Associez les personnes en couples. Cliquez sur deux personnes pour créer un couple. Si le nombre est impair, une personne restera seule.
+                </p>
+                
+                {/* Afficher les couples créés */}
+                {pairingSelection.length > 0 && (
+                  <div style={{ marginBottom: '20px' }}>
+                              <h3 style={{ fontSize: '16px', marginBottom: '10px', color: '#333' }}>Couples créés ({pairingSelection.length}) :</h3>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                      {pairingSelection.map((couple, idx) => {
+                        const [firstIdx, secondIdx] = couple;
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              padding: '10px 15px',
+                              background: '#e8f5e9',
+                              borderRadius: '8px',
+                              border: '2px solid #4caf50',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '10px'
+                            }}
+                          >
+                            <span style={{ color: '#2e7d32', fontWeight: '600' }}>
+                              {getOptionText(currentQuestion.options[firstIdx])} & {getOptionText(currentQuestion.options[secondIdx])}
+                            </span>
+                            {!hasAnswered && !isSpectator && (
+                              <button
+                                onClick={() => {
+                                  const newPairs = pairingSelection.filter((_, i) => i !== idx);
+                                  setPairingSelection(newPairs);
+                                  setPairingTempSelection(null);
+                                }}
+                                style={{
+                                  background: '#f44336',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  padding: '4px 8px',
+                                  cursor: 'pointer',
+                                  fontSize: '12px'
+                                }}
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Liste des personnes disponibles */}
+                <div>
+                  <h3 style={{ fontSize: '16px', marginBottom: '15px', color: '#333' }}>
+                    Personnes disponibles :
+                  </h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '10px' }}>
+                    {currentQuestion.options.map((option: string | Option, index: number) => {
+                      // Vérifier si cette personne est déjà dans un couple
+                      const isInCouple = pairingSelection.some(([a, b]) => a === index || b === index);
+                      
+                      return (
+                        <div
+                          key={index}
+                          className={`quiz-option ${isInCouple ? 'selected' : pairingTempSelection === index ? 'selected' : ''}`}
+                          onClick={() => {
+                            if (!hasAnswered && !isSpectator) {
+                              // Si la personne est déjà dans un couple, ne rien faire
+                              if (isInCouple) return;
+                              
+                              if (pairingTempSelection === null) {
+                                // Première sélection
+                                setPairingTempSelection(index);
+                              } else if (pairingTempSelection === index) {
+                                // Désélectionner
+                                setPairingTempSelection(null);
+                              } else {
+                                // Deuxième sélection - créer le couple
+                                const newCouple: [number, number] = pairingTempSelection < index 
+                                  ? [pairingTempSelection, index] 
+                                  : [index, pairingTempSelection];
+                                // Vérifier qu'on n'a pas déjà ce couple
+                                const coupleExists = pairingSelection.some(([a, b]) => 
+                                  (a === newCouple[0] && b === newCouple[1])
+                                );
+                                if (!coupleExists) {
+                                  setPairingSelection([...pairingSelection, newCouple]);
+                                }
+                                setPairingTempSelection(null);
+                              }
+                            }
+                          }}
+                          style={{
+                            opacity: isInCouple ? 0.6 : pairingTempSelection === index ? 0.8 : 1,
+                            cursor: isInCouple ? 'not-allowed' : 'pointer',
+                            background: isInCouple ? '#c8e6c9' : pairingTempSelection === index ? '#fff9c4' : undefined,
+                            border: pairingTempSelection === index ? '3px solid #fbc02d' : undefined
+                          }}
+                        >
+                          {getOptionText(option)}
+                          {isInCouple && <span style={{ marginLeft: '5px', fontSize: '12px' }}>✓</span>}
+                          {pairingTempSelection === index && <span style={{ marginLeft: '5px', fontSize: '12px' }}>👆</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                
+                {pairingTempSelection !== null && (
+                  <div style={{
+                    marginTop: '15px',
+                    padding: '10px',
+                    background: '#fff9c4',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    fontSize: '14px',
+                    color: '#f57f17'
+                  }}>
+                    👆 Première personne sélectionnée : <strong>{getOptionText(currentQuestion.options[pairingTempSelection])}</strong>. Cliquez sur une autre personne pour créer le couple.
+                  </div>
+                )}
+              </div>
             ) : (
               currentQuestion.options.map((option: string | Option, index: number) => (
                 <div
@@ -2339,6 +2989,8 @@ export default function Home() {
               disabled={
                 currentQuestion.type === 'ranking' 
                   ? rankingOrder.length === 0 || rankingOrder.length !== currentQuestion.options.length
+                  : currentQuestion.type === 'pairing'
+                  ? pairingSelection.length === 0
                   : selectedAnswer === null
               }
             >

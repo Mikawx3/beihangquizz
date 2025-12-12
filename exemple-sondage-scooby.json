@@ -1,0 +1,67 @@
+{
+  "sharedOptions": {
+    "personnages": [
+      {
+        "text": "Scooby-Doo",
+        "image": "https://upload.wikimedia.org/wikipedia/en/5/53/Scooby-Doo.png"
+      },
+      {
+        "text": "Shaggy",
+        "image": "https://upload.wikimedia.org/wikipedia/en/8/8a/Shaggy_Rogers.png"
+      },
+      {
+        "text": "Velma",
+        "image": "https://upload.wikimedia.org/wikipedia/en/8/8a/Velma_Dinkley.png"
+      },
+      {
+        "text": "Daphne",
+        "image": "https://upload.wikimedia.org/wikipedia/en/0/0e/Daphne_Blake.png"
+      },
+      {
+        "text": "Fred",
+        "image": "https://upload.wikimedia.org/wikipedia/en/7/7f/Fred_Jones.png"
+      }
+    ]
+  },
+  "questions": [
+    {
+      "question": "Quel est votre personnage préféré de Scooby-Doo ?",
+      "optionsRef": "personnages",
+      "type": "multiple-choice"
+    },
+    {
+      "question": "Quel couple de personnages s'entend le mieux ?",
+      "optionsRef": "personnages",
+      "type": "pairing"
+    }
+  ]
+}
+
+/*
+✅ FICHIER PRÊT À UTILISER - URLs DIRECTES CONFIGURÉES !
+
+Ce fichier JSON contient déjà :
+- ✅ Images des personnages depuis Wikimedia Commons (domaine public)
+- ✅ Le son (roulement de tambour) sera le même pour toutes les animations
+
+RESSOURCES UTILISÉES :
+- Images : Wikimedia Commons (domaine public)
+  * Scooby-Doo : https://upload.wikimedia.org/wikipedia/en/5/53/Scooby-Doo.png
+  * Shaggy : https://upload.wikimedia.org/wikipedia/en/8/8a/Shaggy_Rogers.png
+  * Velma : https://upload.wikimedia.org/wikipedia/en/8/8a/Velma_Dinkley.png
+  * Daphne : https://upload.wikimedia.org/wikipedia/en/0/0e/Daphne_Blake.png
+  * Fred : https://upload.wikimedia.org/wikipedia/en/7/7f/Fred_Jones.png
+
+- Son : Placez un fichier "drum-roll.mp3" dans le dossier public/sounds/
+  Le roulement de tambour sera joué pour toutes les animations de révélation.
+
+UTILISATION :
+1. Placez un fichier "drum-roll.mp3" dans public/sounds/ (optionnel)
+2. Copiez le contenu JSON ci-dessus
+3. Allez dans l'interface d'administration de votre sondage
+4. Cliquez sur "Importer JSON"
+5. Collez le JSON et cliquez sur "Importer"
+6. Sauvegardez les questions
+
+L'animation de révélation se déclenchera automatiquement quand un personnage sera le gagnant ! 🎬
+*/

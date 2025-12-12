@@ -11,12 +11,25 @@ interface RevealAnimationProps {
   question: string;
   winnerName: string;
   winnerImage?: string;
-  allOptions?: (string | Option)[]; // Toutes les options avec leurs images
+  winnerImage2?: string; // Pour les couples (pairing)
+  allOptions?: (string | Option)[]; // Toutes les options avec leurs images (déprécié, utiliser winnerImage)
   onComplete: () => void;
 }
 
-// URL du son de roulement de tambour (sera le même pour toutes les animations)
-const DRUM_ROLL_SOUND = '/sounds/drum-roll.mp3';
+// Liste des fichiers MP3 disponibles dans /sounds/
+const AVAILABLE_SOUNDS = [
+  '/sounds/drum-roll.mp3',
+  '/sounds/paul.mp3',
+];
+
+// Fonction pour choisir aléatoirement un son parmi ceux disponibles
+// Utilise Math.random() pour une vraie randomisation à chaque appel
+const getRandomSound = (): string => {
+  const randomIndex = Math.floor(Math.random() * AVAILABLE_SOUNDS.length);
+  const selectedSound = AVAILABLE_SOUNDS[randomIndex];
+  console.log(`🎲 Sélection aléatoire: index ${randomIndex} -> ${selectedSound}`);
+  return selectedSound;
+};
 
 // Fonction helper pour obtenir l'image d'une option
 const getOptionImage = (option: string | Option): string | undefined => {
@@ -30,6 +43,7 @@ export default function RevealAnimation({
   question,
   winnerName,
   winnerImage,
+  winnerImage2,
   allOptions = [],
   onComplete,
 }: RevealAnimationProps) {
@@ -58,53 +72,93 @@ export default function RevealAnimation({
   const animationFrameRef = useRef<number | null>(null);
   const lastLetterUpdateRef = useRef<number>(0);
   const lastImageMoveRef = useRef<number>(0);
+  const soundTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const finalDisplayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const fallbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const audioEventListenerRef = useRef<((this: HTMLAudioElement, ev: Event) => void) | null>(null);
 
   useEffect(() => {
-    // Jouer le roulement de tambour pendant 2 secondes seulement
-    if (audioRef.current === null) {
-      const audio = new Audio(DRUM_ROLL_SOUND);
-      audio.volume = 0.7;
-      audio.loop = false; // Ne pas boucler, jouer une seule fois
-      audioRef.current = audio;
-      
-      // Essayer de charger et jouer le son
-      const playAudio = async () => {
-        try {
-          await audio.play();
-          console.log('Son de roulement de tambour joué');
-          
-          // Arrêter le son après 2 secondes
-          setTimeout(() => {
-            if (audioRef.current) {
-              audioRef.current.pause();
-              audioRef.current.currentTime = 0;
-            }
-          }, 2000);
-        } catch (err) {
-          console.warn('Fichier audio non trouvé ou erreur de lecture:', err);
-          console.log('Pour ajouter le son, placez un fichier "drum-roll.mp3" dans le dossier public/sounds/');
-          // Le son ne jouera pas mais l'animation continuera
-        }
-      };
-      
-      // Attendre que l'audio soit chargé avant de jouer
-      audio.addEventListener('canplaythrough', playAudio);
-      audio.load();
-      
-      // Fallback si l'événement ne se déclenche pas
-      setTimeout(() => {
-        if (audio.readyState >= 2) {
-          playAudio();
-        }
-      }, 100);
+    // Nettoyer immédiatement toute animation/son précédent
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
+    if (audioRef.current) {
+      // Nettoyer l'event listener si présent
+      if (audioEventListenerRef.current) {
+        audioRef.current.removeEventListener('canplaythrough', audioEventListenerRef.current);
+        audioEventListenerRef.current = null;
+      }
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    if (soundTimeoutRef.current) {
+      clearTimeout(soundTimeoutRef.current);
+      soundTimeoutRef.current = null;
+    }
+    if (finalDisplayTimeoutRef.current) {
+      clearTimeout(finalDisplayTimeoutRef.current);
+      finalDisplayTimeoutRef.current = null;
+    }
+    if (fallbackTimeoutRef.current) {
+      clearTimeout(fallbackTimeoutRef.current);
+      fallbackTimeoutRef.current = null;
+    }
+
+    // Réinitialiser les états
+    setRevealProgress(0);
+    setImageOpacity(0);
+    setShowFullResult(false);
+    setRandomLetters('');
+
+    // Choisir aléatoirement un son parmi ceux disponibles
+    const randomSound = getRandomSound();
+    const audio = new Audio(randomSound);
+    audio.volume = 0.7;
+    audio.loop = false; // Ne pas boucler, jouer une seule fois
+    audioRef.current = audio;
+    
+    // Essayer de charger et jouer le son
+    const playAudio = async () => {
+      try {
+        await audio.play();
+        console.log(`Son aléatoire joué: ${randomSound}`);
+        
+        // Arrêter le son après 2 secondes
+        soundTimeoutRef.current = setTimeout(() => {
+          if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+          }
+        }, 2000);
+      } catch (err) {
+        console.warn('Fichier audio non trouvé ou erreur de lecture:', err);
+        console.log(`Impossible de jouer le son: ${randomSound}`);
+        // Le son ne jouera pas mais l'animation continuera
+      }
+    };
+    
+    // Stocker la référence à la fonction pour pouvoir la nettoyer
+    audioEventListenerRef.current = playAudio;
+    
+    // Attendre que l'audio soit chargé avant de jouer
+    audio.addEventListener('canplaythrough', playAudio);
+    audio.load();
+    
+    // Fallback si l'événement ne se déclenche pas
+    fallbackTimeoutRef.current = setTimeout(() => {
+      if (audio.readyState >= 2 && audioRef.current === audio) {
+        playAudio();
+      }
+    }, 100);
 
     // Animation du projecteur (durées divisées par 4)
     const startTime = Date.now();
     const spotlightRotationDuration = 1500; // 1.5 secondes pour la rotation du projecteur (6000/4)
     const spotlightCenterDuration = 500; // 0.5 secondes avec le projecteur au centre (2000/4)
     const revealDuration = 500; // 0.5 secondes pour révéler le vrai nom lettre par lettre (2000/4)
-    const finalDisplayDuration = 500; // 0.5 secondes pour l'affichage final (2000/4)
+    const finalDisplayDuration = 1000; // 1 seconde pour l'affichage final (500ms + 500ms supplémentaires pour bien voir le nom)
     const totalDuration = spotlightRotationDuration + spotlightCenterDuration + revealDuration + finalDisplayDuration;
     const halfDuration = totalDuration / 2; // Moitié de l'animation pour commencer le mouvement de l'image
 
@@ -120,53 +174,62 @@ export default function RevealAnimation({
     // Initialiser la position de l'image du gagnant au centre
     setImagePosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 + 200 });
     
-    // Initialiser les images flottantes (chaque image dupliquée 4 fois)
-    const imagesWithSrc = allOptions
-      .map(opt => getOptionImage(opt))
-      .filter((img): img is string => img !== undefined);
+    // Initialiser les images flottantes - utiliser uniquement l'image du gagnant (ou les images du couple)
+    const availableImages: string[] = [];
     
-    // Utiliser les images disponibles
-    const availableImages = imagesWithSrc.length > 0 
-      ? imagesWithSrc 
-      : (winnerImage ? [winnerImage] : []);
+    // Si winnerImage2 est présent, c'est un couple (pairing)
+    if (winnerImage2) {
+      // Pour les couples, utiliser les deux images
+      if (winnerImage) availableImages.push(winnerImage);
+      if (winnerImage2) availableImages.push(winnerImage2);
+    } else if (winnerImage) {
+      // Pour les autres types, utiliser uniquement l'image du gagnant
+      availableImages.push(winnerImage);
+    }
     
-    // Dupliquer chaque image 4 fois avec des positions différentes
-    const duplicatesPerImage = 4;
-    const initialFloatingImages: Array<{
-      id: number;
-      image: string;
-      position: { x: number; y: number };
-      size: number;
-      lastMove: number;
-    }> = [];
-    
-    availableImages.forEach((image, imageIndex) => {
-      for (let duplicateIndex = 0; duplicateIndex < duplicatesPerImage; duplicateIndex++) {
-        const size = 80 + Math.random() * 120; // Tailles entre 80px et 200px
-        const maxX = window.innerWidth - size;
-        const maxY = window.innerHeight - size;
-        const minX = size;
-        const minY = size;
-        
-        // Position différente pour chaque duplication
-        const positionX = Math.random() * (maxX - minX) + minX;
-        const positionY = Math.random() * (maxY - minY) + minY;
-        
-        initialFloatingImages.push({
-          id: imageIndex * duplicatesPerImage + duplicateIndex,
-          image: image,
-          position: {
-            x: positionX,
-            y: positionY,
-          },
-          size,
-          lastMove: 0,
-        });
-      }
-    });
-    
-    setFloatingImages(initialFloatingImages);
-    floatingImagesRef.current = initialFloatingImages;
+    // Si aucune image n'est disponible, ne pas créer d'images flottantes
+    if (availableImages.length === 0) {
+      setFloatingImages([]);
+      floatingImagesRef.current = [];
+    } else {
+      // Dupliquer chaque image 4 fois avec des positions différentes
+      const duplicatesPerImage = 4;
+      const initialFloatingImages: Array<{
+        id: number;
+        image: string;
+        position: { x: number; y: number };
+        size: number;
+        lastMove: number;
+      }> = [];
+      
+      availableImages.forEach((image, imageIndex) => {
+        for (let duplicateIndex = 0; duplicateIndex < duplicatesPerImage; duplicateIndex++) {
+          const size = 80 + Math.random() * 120; // Tailles entre 80px et 200px
+          const maxX = window.innerWidth - size;
+          const maxY = window.innerHeight - size;
+          const minX = size;
+          const minY = size;
+          
+          // Position différente pour chaque duplication
+          const positionX = Math.random() * (maxX - minX) + minX;
+          const positionY = Math.random() * (maxY - minY) + minY;
+          
+          initialFloatingImages.push({
+            id: imageIndex * duplicatesPerImage + duplicateIndex,
+            image: image,
+            position: {
+              x: positionX,
+              y: positionY,
+            },
+            size,
+            lastMove: 0,
+          });
+        }
+      });
+      
+      setFloatingImages(initialFloatingImages);
+      floatingImagesRef.current = initialFloatingImages;
+    }
 
     const animate = () => {
       const elapsed = Date.now() - startTime;
@@ -310,10 +373,11 @@ export default function RevealAnimation({
         
         if (!showFullResult) {
           setShowFullResult(true);
-          // Attendre encore 0.5 secondes avant d'appeler onComplete (2000/4)
-          setTimeout(() => {
+          // Attendre encore 1 seconde avant d'appeler onComplete (pour bien voir le nom)
+          finalDisplayTimeoutRef.current = setTimeout(() => {
             if (audioRef.current) {
               audioRef.current.pause();
+              audioRef.current.currentTime = 0;
               audioRef.current = null;
             }
             onComplete();
@@ -329,16 +393,35 @@ export default function RevealAnimation({
     animationFrameRef.current = requestAnimationFrame(animate);
 
     return () => {
+      // Nettoyer complètement toutes les ressources
       if (animationFrameRef.current !== null) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
       if (audioRef.current) {
+        // Nettoyer l'event listener si présent
+        if (audioEventListenerRef.current) {
+          audioRef.current.removeEventListener('canplaythrough', audioEventListenerRef.current);
+          audioEventListenerRef.current = null;
+        }
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
         audioRef.current = null;
       }
+      if (soundTimeoutRef.current) {
+        clearTimeout(soundTimeoutRef.current);
+        soundTimeoutRef.current = null;
+      }
+      if (finalDisplayTimeoutRef.current) {
+        clearTimeout(finalDisplayTimeoutRef.current);
+        finalDisplayTimeoutRef.current = null;
+      }
+      if (fallbackTimeoutRef.current) {
+        clearTimeout(fallbackTimeoutRef.current);
+        fallbackTimeoutRef.current = null;
+      }
     };
-  }, [showFullResult, onComplete, winnerName.length, allOptions]);
+  }, [question, winnerName, winnerImage, winnerImage2, onComplete]);
 
   // Calculer le texte à afficher selon la phase de l'animation
   const getDisplayedText = () => {
@@ -479,7 +562,7 @@ export default function RevealAnimation({
         </div>
       ))}
 
-      {/* Image du gagnant */}
+      {/* Image(s) du gagnant */}
       {winnerImage && (
         <div
           style={{
@@ -490,25 +573,53 @@ export default function RevealAnimation({
             opacity: imageOpacity,
             transition: 'left 0.2s ease-out, top 0.2s ease-out, opacity 0.125s ease',
             zIndex: 10001,
-            maxWidth: '400px',
+            maxWidth: winnerImage2 ? '800px' : '400px',
             maxHeight: '400px',
             animation: showFullResult ? 'pulse 0.25s ease-in-out infinite' : 'none',
+            display: 'flex',
+            gap: '20px',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
           <img
             src={winnerImage}
             alt={winnerName}
             style={{
-              width: '100%',
-              height: '100%',
+              width: winnerImage2 ? '300px' : '100%',
+              height: winnerImage2 ? '300px' : '100%',
               objectFit: 'contain',
               filter: 'drop-shadow(0 0 30px rgba(255, 255, 255, 0.8))',
             }}
             onError={(e) => {
-              // Si l'image ne charge pas, masquer l'élément
               (e.target as HTMLImageElement).style.display = 'none';
             }}
           />
+          {winnerImage2 && (
+            <>
+              <span style={{ 
+                fontSize: '48px', 
+                color: 'white', 
+                fontWeight: 'bold',
+                textShadow: '0 0 20px rgba(255, 255, 255, 0.8)'
+              }}>
+                &
+              </span>
+              <img
+                src={winnerImage2}
+                alt=""
+                style={{
+                  width: '300px',
+                  height: '300px',
+                  objectFit: 'contain',
+                  filter: 'drop-shadow(0 0 30px rgba(255, 255, 255, 0.8))',
+                }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            </>
+          )}
         </div>
       )}
 
