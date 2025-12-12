@@ -20,6 +20,11 @@ interface RevealAnimationProps {
 const AVAILABLE_SOUNDS = [
   '/sounds/drum-roll.mp3',
   '/sounds/paul.mp3',
+  '/sounds/Dayun Jindu.mp3',
+  '/sounds/Dayun Jindu 2.mp3',
+  '/sounds/Dayun Jindu 3.mp3',
+  '/sounds/Dayun Jindu 4.mp3',
+  '/sounds/Kouweitang (Dayun Jindu Shop).mp3',
 ];
 
 // Contexte audio global pour iOS - sera activé lors de la première interaction utilisateur

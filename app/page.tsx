@@ -41,6 +41,72 @@ const getOptionImage = (option: string | Option): string | undefined => {
   return option.image;
 };
 
+// Fonction pour générer des commentaires drôles basés sur la position
+const getFunnyComment = (rank: number, total: number, votes: number, maxVotes: number, type: 'multiple-choice' | 'ranking' | 'pairing' = 'multiple-choice'): string => {
+  const percentage = total > 0 ? (votes / total) * 100 : 0;
+  const isWinner = rank === 0;
+  const isLast = rank === total - 1;
+  
+  if (type === 'multiple-choice') {
+    if (isWinner && percentage > 50) {
+      return '🏆 Le grand gagnant ! Domination totale !';
+    }
+    if (isWinner && percentage > 30) {
+      return '🥇 Premier de la classe ! Bien joué !';
+    }
+    if (isWinner) {
+      return '🎯 Gagnant par la peau des dents !';
+    }
+    if (rank === 1 && percentage > 20) {
+      return '🥈 Presque là ! Le podium te tend les bras !';
+    }
+    if (rank === 2) {
+      return '🥉 Troisième place ! Pas mal du tout !';
+    }
+    if (rank <= total / 3 && percentage > 10) {
+      return '👍 Dans le top tier ! Respect !';
+    }
+    if (rank <= total / 2 && percentage > 5) {
+      return '😊 Dans la moyenne, c\'est déjà ça !';
+    }
+    if (isLast && votes === 0) {
+      return '😅 Personne ne t\'a choisi... Mais on t\'aime quand même !';
+    }
+    if (isLast) {
+      return '💪 Dernier mais pas le moins courageux !';
+    }
+    if (percentage < 5) {
+      return '🤷 Quelques votes, c\'est mieux que rien !';
+    }
+    return '📊 Dans le classement, c\'est déjà bien !';
+  }
+  
+  if (type === 'ranking') {
+    const position = rank + 1;
+    if (position === 1) {
+      return '👑 Numéro 1 ! Le roi/la reine du classement !';
+    }
+    if (position === 2) {
+      return '🥈 Vice-champion(ne) ! Presque au sommet !';
+    }
+    if (position === 3) {
+      return '🥉 Troisième ! Le podium est à toi !';
+    }
+    if (position <= total / 4) {
+      return '⭐ Dans le top quart ! Excellent classement !';
+    }
+    if (position <= total / 2) {
+      return '👍 Au-dessus de la moyenne ! Pas mal !';
+    }
+    if (position > total * 0.75) {
+      return '😅 En bas du classement... Mais tu restes dans le cœur !';
+    }
+    return '📊 Position moyenne, c\'est déjà ça !';
+  }
+  
+  return '💫 Un couple qui mérite d\'être célébré !';
+};
+
 // Le son (roulement de tambour) sera le même pour toutes les animations
 
 export default function Home() {
@@ -1755,6 +1821,8 @@ export default function Home() {
                           const optionText = getOptionText(option);
                           const isFirst = rankIndex === 0 && count > 0;
                           const hasNoVotes = count === 0;
+                          const totalOptions = currentStat.options.length;
+                          const funnyComment = getFunnyComment(rankIndex, totalOptions, count, count, 'ranking');
                             
                             return (
                               <div key={optionIndex} style={{ 
@@ -1775,7 +1843,7 @@ export default function Home() {
                                       color: isFirst ? 'white' : '#333' 
                                     }}>
                                       {isFirst && <span style={{ marginRight: '8px' }}>🏆</span>}
-                                      {optionText}
+                                      {rankIndex + 1}. {optionText}
                                     </span>
                                   </div>
                                   <div style={{ textAlign: 'right', marginLeft: '20px' }}>
@@ -1812,6 +1880,46 @@ export default function Home() {
                                     )}
                                   </div>
                                 </div>
+                                
+                                {/* Barre de progression visuelle pour la position */}
+                                {!hasNoVotes && (
+                                  <div style={{
+                                    marginTop: '12px',
+                                    width: '100%',
+                                    height: '30px',
+                                    background: isFirst ? 'rgba(255,255,255,0.2)' : '#e0e0e0',
+                                    borderRadius: '15px',
+                                    overflow: 'hidden',
+                                    position: 'relative',
+                                    boxShadow: isFirst ? 'inset 0 2px 4px rgba(0,0,0,0.1)' : 'inset 0 2px 4px rgba(0,0,0,0.1)'
+                                  }}>
+                                    <div
+                                      style={{
+                                        width: `${((totalOptions - averagePosition) / totalOptions) * 100}%`,
+                                        height: '100%',
+                                        background: isFirst 
+                                          ? 'rgba(255,255,255,0.4)' 
+                                          : 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+                                        transition: 'width 0.8s ease',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'flex-end',
+                                        paddingRight: '10px',
+                                        color: isFirst ? 'white' : 'white',
+                                        fontSize: '12px',
+                                        fontWeight: '700',
+                                      }}
+                                    >
+                                      {averagePosition < totalOptions * 0.3 && (
+                                        <span style={{ textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>
+                                          Top tier !
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                {/* Commentaire drôle */}
                                 {!hasNoVotes && (
                                   <div style={{
                                     marginTop: '10px',
@@ -1821,10 +1929,7 @@ export default function Home() {
                                     paddingTop: '8px',
                                     borderTop: isFirst ? '1px solid rgba(255,255,255,0.3)' : '1px solid #f0f0f0'
                                   }}>
-                                    {averagePosition < 0.5 ? '⭐ Très bien classé (préféré)' : 
-                                     averagePosition < 1.5 ? '👍 Bien classé' :
-                                     averagePosition < 2.5 ? '➖ Moyennement classé' : 
-                                     averagePosition < 3.5 ? '👎 Moins bien classé' : '❌ Très mal classé'}
+                                    {funnyComment}
                                   </div>
                                 )}
                                 {hasNoVotes && (
@@ -1875,6 +1980,9 @@ export default function Home() {
                           const secondText = getOptionText(secondOption);
                           const isTopThree = rankIndex < 3;
                           const percentage = currentStat.totalVotes > 0 ? (couple.votes / currentStat.totalVotes) * 100 : 0;
+                          const maxVotes = Math.max(...Object.values(currentStat.coupleVotes).map((v: any) => v as number));
+                          const totalCouples = Object.keys(currentStat.coupleVotes).length;
+                          const funnyComment = getFunnyComment(rankIndex, totalCouples, couple.votes, maxVotes, 'pairing');
                           
                           const getRankColor = (rank: number) => {
                             if (rank === 0) return 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)';
@@ -1945,7 +2053,7 @@ export default function Home() {
                                   </div>
                                 </div>
                               </div>
-                              
+
                               <div style={{
                                 width: '100%',
                                 height: isTopThree ? '40px' : '35px',
@@ -1953,7 +2061,8 @@ export default function Home() {
                                 borderRadius: '20px',
                                 overflow: 'hidden',
                                 position: 'relative',
-                                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
+                                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)',
+                                marginBottom: '10px'
                               }}>
                                 <div
                                   style={{
@@ -1977,6 +2086,18 @@ export default function Home() {
                                     </span>
                                   )}
                                 </div>
+                              </div>
+                              
+                              {/* Commentaire drôle */}
+                              <div style={{
+                                fontSize: '13px',
+                                color: isTopThree ? '#555' : '#888',
+                                fontStyle: 'italic',
+                                paddingTop: '8px',
+                                borderTop: '1px solid #f0f0f0',
+                                textAlign: 'left'
+                              }}>
+                                {funnyComment}
                               </div>
                             </div>
                           );
@@ -2033,6 +2154,8 @@ export default function Home() {
                         };
                         
                         const isTopThree = rank < 3;
+                        const maxVotes = Math.max(...Object.values(currentStat.votes) as number[]);
+                        const funnyComment = getFunnyComment(rank, currentStat.options.length, votes, maxVotes, 'multiple-choice');
                         
                         return (
                           <div 
@@ -2097,7 +2220,8 @@ export default function Home() {
                               borderRadius: '20px',
                               overflow: 'hidden',
                               position: 'relative',
-                              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
+                              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)',
+                              marginBottom: '10px'
                             }}>
                               <div
                                 style={{
@@ -2121,6 +2245,18 @@ export default function Home() {
                                   </span>
                                 )}
                               </div>
+                            </div>
+                            
+                            {/* Commentaire drôle */}
+                            <div style={{
+                              fontSize: '13px',
+                              color: isTopThree ? '#555' : '#888',
+                              fontStyle: 'italic',
+                              paddingTop: '8px',
+                              borderTop: '1px solid #f0f0f0',
+                              textAlign: 'left'
+                            }}>
+                              {funnyComment}
                             </div>
                           </div>
                         );
