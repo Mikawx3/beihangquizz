@@ -270,6 +270,7 @@ export default function Home() {
   } | null>(null);
   const [lastAnimatedResultIndex, setLastAnimatedResultIndex] = useState<number>(-1); // Pour éviter de rejouer l'animation pour le même résultat
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(-1); // Index de la question actuelle depuis Firestore
+  const [showBonusResults, setShowBonusResults] = useState(false); // Afficher les résultats bonus
   const router = useRouter();
   const hasCheckedLocalStorage = useRef(false); // Pour éviter les vérifications multiples du localStorage
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null); // Référence pour l'intervalle du timer
@@ -687,6 +688,188 @@ export default function Home() {
       return [];
     }
   }, [results, questions]);
+
+  // Fonction helper pour générer des commentaires drôles pour les stats bonus
+  const getBonusFunnyComment = (first: number, second: number, third: number, rank: number): string => {
+    const total = first + second + third;
+    
+    if (rank === 0 && first >= 3) {
+      return '👑 Le roi/la reine incontesté(e) ! Domination totale !';
+    }
+    if (rank === 0 && first === 2) {
+      return '🏆 Double champion(ne) ! Deux victoires brillantes !';
+    }
+    if (rank === 0 && first === 1) {
+      return '⭐ Une fois au sommet, toujours au sommet !';
+    }
+    if (first >= 2) {
+      return '🔥 En feu ! Plusieurs victoires à son actif !';
+    }
+    if (first === 1 && second >= 2) {
+      return '💪 Toujours dans le top 3, très régulier(ère) !';
+    }
+    if (first === 1 && second === 1) {
+      return '🎯 Toujours dans le top 2, excellent(e) !';
+    }
+    if (second >= 2) {
+      return '🥈 Toujours deuxième, mais très constant(e) !';
+    }
+    if (third >= 2) {
+      return '🥉 Toujours sur le podium, bravo !';
+    }
+    if (total >= 3) {
+      return '✨ Très présent(e) dans les tops !';
+    }
+    if (total === 2) {
+      return '👍 Deux apparitions dans les tops, pas mal !';
+    }
+    return '🌟 Une belle performance !';
+  };
+
+  // Calculer les statistiques bonus (combien de fois chaque option a été première, deuxième, etc.)
+  const calculateBonusStats = useCallback(() => {
+    if (!results || !Array.isArray(results) || results.length === 0) {
+      return null;
+    }
+    if (!questions || !Array.isArray(questions) || questions.length === 0) {
+      return null;
+    }
+
+    try {
+      // Structure : { optionText: { first: number, second: number, third: number } }
+      // On regroupe par nom d'option uniquement, sans mentionner la question
+      const bonusStats: { [key: string]: { first: number; second: number; third: number } } = {};
+      
+      questions.forEach((question: any, questionIndex: number) => {
+        if (!question) return;
+        
+        const questionStats = calculateQuestionStats();
+        const currentStat = questionStats[questionIndex];
+        if (!currentStat) return;
+
+        if (question.type === 'multiple-choice') {
+          // Pour multiple-choice, trouver toutes les options gagnantes (les plus votées)
+          let maxVotes = 0;
+          const winnerOptionIndices: number[] = [];
+          
+          Object.keys(currentStat.votes || {}).forEach((optionIndexStr) => {
+            const optionIndex = parseInt(optionIndexStr);
+            const votes = currentStat.votes[optionIndex] || 0;
+            if (votes > maxVotes) {
+              maxVotes = votes;
+              winnerOptionIndices.length = 0; // Réinitialiser
+              winnerOptionIndices.push(optionIndex);
+            } else if (votes === maxVotes && votes > 0) {
+              winnerOptionIndices.push(optionIndex);
+            }
+          });
+
+          // Compter toutes les options gagnantes comme premières
+          winnerOptionIndices.forEach((winnerOptionIndex) => {
+            if (currentStat.options && currentStat.options[winnerOptionIndex]) {
+              const option = currentStat.options[winnerOptionIndex];
+              const optionText = getOptionText(option);
+              
+              if (!bonusStats[optionText]) {
+                bonusStats[optionText] = { first: 0, second: 0, third: 0 };
+              }
+              bonusStats[optionText].first = (bonusStats[optionText].first || 0) + 1;
+            }
+          });
+        } else if (question.type === 'ranking') {
+          // Pour ranking, trouver les 3 premières options
+          if (currentStat.rankingAverages && currentStat.options) {
+            const sortedOptions = Object.keys(currentStat.rankingAverages)
+              .map(optIdx => parseInt(optIdx))
+              .sort((a, b) => {
+                const avgA = currentStat.rankingAverages[a]?.average ?? 999;
+                const avgB = currentStat.rankingAverages[b]?.average ?? 999;
+                return avgA - avgB;
+              })
+              .filter(optIdx => {
+                const avgData = currentStat.rankingAverages[optIdx];
+                return avgData && avgData.count > 0;
+              });
+
+            sortedOptions.slice(0, 3).forEach((optionIndex, rankIndex) => {
+              if (currentStat.options[optionIndex]) {
+                const option = currentStat.options[optionIndex];
+                const optionText = getOptionText(option);
+                
+                if (!bonusStats[optionText]) {
+                  bonusStats[optionText] = { first: 0, second: 0, third: 0 };
+                }
+                
+                if (rankIndex === 0) {
+                  bonusStats[optionText].first = (bonusStats[optionText].first || 0) + 1;
+                } else if (rankIndex === 1) {
+                  bonusStats[optionText].second = (bonusStats[optionText].second || 0) + 1;
+                } else if (rankIndex === 2) {
+                  bonusStats[optionText].third = (bonusStats[optionText].third || 0) + 1;
+                }
+              }
+            });
+          }
+        } else if (question.type === 'pairing') {
+          // Pour pairing, trouver le couple le plus choisi
+          if (currentStat.coupleVotes && currentStat.options) {
+            let maxVotes = 0;
+            let bestCouple: [number, number] | null = null;
+            
+            Object.keys(currentStat.coupleVotes).forEach((coupleKey) => {
+              const votes = currentStat.coupleVotes[coupleKey] || 0;
+              if (votes > maxVotes) {
+                maxVotes = votes;
+                const [first, second] = coupleKey.split(',').map(Number);
+                bestCouple = [first, second];
+              }
+            });
+
+            if (bestCouple && currentStat.options[bestCouple[0]] && currentStat.options[bestCouple[1]]) {
+              const option1 = currentStat.options[bestCouple[0]];
+              const option2 = currentStat.options[bestCouple[1]];
+              const optionText1 = getOptionText(option1);
+              const optionText2 = getOptionText(option2);
+              
+              if (!bonusStats[optionText1]) {
+                bonusStats[optionText1] = { first: 0, second: 0, third: 0 };
+              }
+              if (!bonusStats[optionText2]) {
+                bonusStats[optionText2] = { first: 0, second: 0, third: 0 };
+              }
+              
+              // Les deux options du couple gagnant sont comptées comme premières
+              bonusStats[optionText1].first = (bonusStats[optionText1].first || 0) + 1;
+              bonusStats[optionText2].first = (bonusStats[optionText2].first || 0) + 1;
+            }
+          }
+        }
+      });
+
+      // Convertir en tableau trié par nombre de fois première
+      const bonusArray = Object.keys(bonusStats).map(optionText => ({
+        optionText,
+        first: bonusStats[optionText].first || 0,
+        second: bonusStats[optionText].second || 0,
+        third: bonusStats[optionText].third || 0,
+        total: (bonusStats[optionText].first || 0) + (bonusStats[optionText].second || 0) + (bonusStats[optionText].third || 0)
+      })).sort((a, b) => {
+        // Trier d'abord par nombre de fois première, puis deuxième, puis troisième
+        if (b.first !== a.first) return b.first - a.first;
+        if (b.second !== a.second) return b.second - a.second;
+        return b.third - a.third;
+      }).map((stat, index) => ({
+        ...stat,
+        rank: index,
+        comment: getBonusFunnyComment(stat.first, stat.second, stat.third, index)
+      }));
+
+      return bonusArray;
+    } catch (error) {
+      console.error('Erreur lors du calcul des statistiques bonus:', error);
+      return null;
+    }
+  }, [results, questions, calculateQuestionStats]);
 
   // Écouter les changements de session
   const listenToSession = useCallback((sid: string) => {
@@ -2878,6 +3061,23 @@ export default function Home() {
               </h2>
               <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', flexWrap: 'wrap' }}>
                 <button
+                  onClick={() => setShowBonusResults(!showBonusResults)}
+                  className="button"
+                  style={{
+                    background: showBonusResults ? '#f5576c' : 'white',
+                    color: showBonusResults ? 'white' : '#f5576c',
+                    fontSize: '16px',
+                    padding: '15px 30px',
+                    fontWeight: '600',
+                    border: 'none',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 10px rgba(0, 0, 0, 0.2)'
+                  }}
+                >
+                  {showBonusResults ? '📊 Masquer les résultats bonus' : '⭐ Voir les résultats bonus'}
+                </button>
+                <button
                   onClick={handleLeaveSession}
                   className="button"
                   style={{
@@ -2917,6 +3117,497 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          {/* Affichage des résultats bonus */}
+          {showBonusResults && currentResultIndex >= questions.length - 1 && (() => {
+            const bonusStats = calculateBonusStats();
+            if (!bonusStats || bonusStats.length === 0) {
+              return (
+                <div style={{
+                  marginTop: '30px',
+                  padding: '30px',
+                  background: '#f9f9f9',
+                  borderRadius: '15px',
+                  textAlign: 'center',
+                  border: '1px solid #e0e0e0'
+                }}>
+                  <p style={{ color: '#666', fontSize: '16px' }}>
+                    Aucune statistique bonus disponible pour le moment.
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div style={{
+                marginTop: '30px',
+                padding: '30px',
+                background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                borderRadius: '15px',
+                boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)'
+              }}>
+                <h2 style={{ color: 'white', marginBottom: '15px', fontSize: '32px', textAlign: 'center', textShadow: '0 2px 10px rgba(0,0,0,0.3)' }}>
+                  ⭐ Résultats Bonus 🎉
+                </h2>
+                <p style={{ color: 'rgba(255, 255, 255, 0.95)', marginBottom: '30px', fontSize: '16px', textAlign: 'center', fontStyle: 'italic' }}>
+                  Combien de fois chaque réponse a été première, deuxième ou troisième sur TOUTES les questions !
+                </p>
+                
+                {/* Graphiques et visualisations */}
+                <div style={{
+                  marginBottom: '40px',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+                  gap: '20px'
+                }}>
+                  {/* Graphique en barres - Top 5 des premières places */}
+                  {bonusStats.length > 0 && (() => {
+                    const top5First = [...bonusStats]
+                      .filter(s => s.first > 0)
+                      .slice(0, 5)
+                      .sort((a, b) => b.first - a.first);
+                    const maxFirst = Math.max(...top5First.map(s => s.first), 1);
+                    
+                    return (
+                      <div style={{
+                        background: 'rgba(255, 255, 255, 0.95)',
+                        padding: '25px',
+                        borderRadius: '15px',
+                        boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)'
+                      }}>
+                        <h3 style={{ margin: '0 0 20px 0', fontSize: '20px', color: '#333', textAlign: 'center', fontWeight: '700' }}>
+                          📊 Top 5 - Premières Places
+                        </h3>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                          {top5First.map((stat, idx) => {
+                            const percentage = (stat.first / maxFirst) * 100;
+                            return (
+                              <div key={stat.optionText} style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                                  <span style={{ fontSize: '14px', fontWeight: '600', color: '#333', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {idx === 0 && '🥇'} {idx === 1 && '🥈'} {idx === 2 && '🥉'} {stat.optionText}
+                                  </span>
+                                  <span style={{ fontSize: '16px', fontWeight: '700', color: '#667eea', marginLeft: '10px' }}>
+                                    {stat.first}
+                                  </span>
+                                </div>
+                                <div style={{
+                                  width: '100%',
+                                  height: '30px',
+                                  background: '#e0e0e0',
+                                  borderRadius: '15px',
+                                  overflow: 'hidden',
+                                  position: 'relative'
+                                }}>
+                                  <div style={{
+                                    width: `${percentage}%`,
+                                    height: '100%',
+                                    background: idx === 0 
+                                      ? 'linear-gradient(90deg, #ffd700 0%, #ffed4e 100%)'
+                                      : idx === 1
+                                      ? 'linear-gradient(90deg, #c0c0c0 0%, #e8e8e8 100%)'
+                                      : idx === 2
+                                      ? 'linear-gradient(90deg, #cd7f32 0%, #e6a857 100%)'
+                                      : 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+                                    borderRadius: '15px',
+                                    transition: 'width 1s ease-out',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'flex-end',
+                                    paddingRight: '10px',
+                                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
+                                  }}>
+                                    {percentage > 20 && (
+                                      <span style={{ fontSize: '12px', fontWeight: '700', color: idx < 3 ? '#333' : 'white' }}>
+                                        {stat.first}x
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  
+                  {/* Graphique circulaire - Répartition des podiums */}
+                  {bonusStats.length > 0 && (() => {
+                    const totalFirst = bonusStats.reduce((sum, s) => sum + s.first, 0);
+                    const totalSecond = bonusStats.reduce((sum, s) => sum + s.second, 0);
+                    const totalThird = bonusStats.reduce((sum, s) => sum + s.third, 0);
+                    const totalPodiums = totalFirst + totalSecond + totalThird;
+                    
+                    if (totalPodiums > 0) {
+                      const firstPercent = (totalFirst / totalPodiums) * 100;
+                      const secondPercent = (totalSecond / totalPodiums) * 100;
+                      const thirdPercent = (totalThird / totalPodiums) * 100;
+                      
+                      // Calculer les angles pour le graphique circulaire
+                      const firstAngle = (firstPercent / 100) * 360;
+                      const secondAngle = (secondPercent / 100) * 360;
+                      const thirdAngle = (thirdPercent / 100) * 360;
+                      
+                      return (
+                        <div style={{
+                          background: 'rgba(255, 255, 255, 0.95)',
+                          padding: '25px',
+                          borderRadius: '15px',
+                          boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center'
+                        }}>
+                          <h3 style={{ margin: '0 0 20px 0', fontSize: '20px', color: '#333', textAlign: 'center', fontWeight: '700' }}>
+                            🎯 Répartition des Podiums
+                          </h3>
+                          <div style={{ position: 'relative', width: '200px', height: '200px', marginBottom: '20px' }}>
+                            {/* Graphique circulaire en CSS */}
+                            <svg width="200" height="200" viewBox="0 0 200 200" style={{ transform: 'rotate(-90deg)' }}>
+                              <circle
+                                cx="100"
+                                cy="100"
+                                r="80"
+                                fill="none"
+                                stroke="#e0e0e0"
+                                strokeWidth="40"
+                              />
+                              {firstPercent > 0 && (
+                                <circle
+                                  cx="100"
+                                  cy="100"
+                                  r="80"
+                                  fill="none"
+                                  stroke="#667eea"
+                                  strokeWidth="40"
+                                  strokeDasharray={`${(firstAngle / 360) * 502.4} 502.4`}
+                                  style={{ transition: 'stroke-dasharray 1s ease-out' }}
+                                />
+                              )}
+                              {secondPercent > 0 && (
+                                <circle
+                                  cx="100"
+                                  cy="100"
+                                  r="80"
+                                  fill="none"
+                                  stroke="#f5576c"
+                                  strokeWidth="40"
+                                  strokeDasharray={`${(secondAngle / 360) * 502.4} 502.4`}
+                                  strokeDashoffset={-(firstAngle / 360) * 502.4}
+                                  style={{ transition: 'stroke-dasharray 1s ease-out' }}
+                                />
+                              )}
+                              {thirdPercent > 0 && (
+                                <circle
+                                  cx="100"
+                                  cy="100"
+                                  r="80"
+                                  fill="none"
+                                  stroke="#4facfe"
+                                  strokeWidth="40"
+                                  strokeDasharray={`${(thirdAngle / 360) * 502.4} 502.4`}
+                                  strokeDashoffset={-((firstAngle + secondAngle) / 360) * 502.4}
+                                  style={{ transition: 'stroke-dasharray 1s ease-out' }}
+                                />
+                              )}
+                            </svg>
+                            <div style={{
+                              position: 'absolute',
+                              top: '50%',
+                              left: '50%',
+                              transform: 'translate(-50%, -50%)',
+                              textAlign: 'center'
+                            }}>
+                              <div style={{ fontSize: '32px', fontWeight: '800', color: '#333' }}>
+                                {totalPodiums}
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#666' }}>
+                                Total
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div style={{ width: '20px', height: '20px', background: '#667eea', borderRadius: '4px' }}></div>
+                              <span style={{ fontSize: '14px', flex: 1 }}>1er place</span>
+                              <span style={{ fontSize: '16px', fontWeight: '700', color: '#667eea' }}>{totalFirst}</span>
+                              <span style={{ fontSize: '14px', color: '#666' }}>({firstPercent.toFixed(1)}%)</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div style={{ width: '20px', height: '20px', background: '#f5576c', borderRadius: '4px' }}></div>
+                              <span style={{ fontSize: '14px', flex: 1 }}>2ème place</span>
+                              <span style={{ fontSize: '16px', fontWeight: '700', color: '#f5576c' }}>{totalSecond}</span>
+                              <span style={{ fontSize: '14px', color: '#666' }}>({secondPercent.toFixed(1)}%)</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div style={{ width: '20px', height: '20px', background: '#4facfe', borderRadius: '4px' }}></div>
+                              <span style={{ fontSize: '14px', flex: 1 }}>3ème place</span>
+                              <span style={{ fontSize: '16px', fontWeight: '700', color: '#4facfe' }}>{totalThird}</span>
+                              <span style={{ fontSize: '14px', color: '#666' }}>({thirdPercent.toFixed(1)}%)</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                  
+                  {/* Graphique comparatif - Total des apparitions */}
+                  {bonusStats.length > 0 && (() => {
+                    const top10Total = [...bonusStats].slice(0, 10).sort((a, b) => b.total - a.total);
+                    const maxTotal = Math.max(...top10Total.map(s => s.total), 1);
+                    
+                    return (
+                      <div style={{
+                        background: 'rgba(255, 255, 255, 0.95)',
+                        padding: '25px',
+                        borderRadius: '15px',
+                        boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)'
+                      }}>
+                        <h3 style={{ margin: '0 0 20px 0', fontSize: '20px', color: '#333', textAlign: 'center', fontWeight: '700' }}>
+                          📈 Top 10 - Total des Apparitions
+                        </h3>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {top10Total.map((stat, idx) => {
+                            const percentage = (stat.total / maxTotal) * 100;
+                            return (
+                              <div key={stat.optionText} style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                                  <span style={{ fontSize: '13px', fontWeight: '500', color: '#333', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {idx + 1}. {stat.optionText}
+                                  </span>
+                                  <span style={{ fontSize: '15px', fontWeight: '700', color: '#764ba2', marginLeft: '10px' }}>
+                                    {stat.total}
+                                  </span>
+                                </div>
+                                <div style={{
+                                  width: '100%',
+                                  height: '25px',
+                                  background: '#f0f0f0',
+                                  borderRadius: '12px',
+                                  overflow: 'hidden',
+                                  position: 'relative'
+                                }}>
+                                  <div style={{
+                                    width: `${percentage}%`,
+                                    height: '100%',
+                                    background: `linear-gradient(90deg, hsl(${240 - idx * 10}, 70%, 60%) 0%, hsl(${240 - idx * 10}, 70%, 75%) 100%)`,
+                                    borderRadius: '12px',
+                                    transition: 'width 1s ease-out',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'flex-end',
+                                    paddingRight: percentage > 15 ? '8px' : '0',
+                                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
+                                  }}>
+                                    {percentage > 15 && (
+                                      <span style={{ fontSize: '11px', fontWeight: '700', color: 'white' }}>
+                                        {stat.total}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: '#999', marginTop: '2px' }}>
+                                  {stat.first > 0 && <span>🥇 {stat.first}</span>}
+                                  {stat.second > 0 && <span>🥈 {stat.second}</span>}
+                                  {stat.third > 0 && <span>🥉 {stat.third}</span>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {bonusStats.map((stat, index) => {
+                    const isTop = index === 0 && stat.first > 0;
+                    const isSecond = index === 1;
+                    const isThird = index === 2;
+                    
+                    // Emoji selon le rang
+                    let rankEmoji = '';
+                    if (isTop && stat.first >= 3) rankEmoji = '👑';
+                    else if (isTop && stat.first >= 2) rankEmoji = '🏆';
+                    else if (isTop) rankEmoji = '🥇';
+                    else if (isSecond) rankEmoji = '🥈';
+                    else if (isThird) rankEmoji = '🥉';
+                    else if (stat.first > 0) rankEmoji = '⭐';
+                    else if (stat.second > 0) rankEmoji = '✨';
+                    else rankEmoji = '💫';
+                    
+                    return (
+                      <div
+                        key={stat.optionText}
+                        style={{
+                          background: isTop 
+                            ? 'linear-gradient(135deg, #ffd700 0%, #ffed4e 100%)' 
+                            : isSecond
+                            ? 'linear-gradient(135deg, #c0c0c0 0%, #e8e8e8 100%)'
+                            : isThird
+                            ? 'linear-gradient(135deg, #cd7f32 0%, #e6a857 100%)'
+                            : 'rgba(255, 255, 255, 0.95)',
+                          padding: isTop ? '30px' : '25px',
+                          borderRadius: '15px',
+                          border: isTop ? '4px solid #ff6b6b' : isSecond ? '3px solid #4ecdc4' : isThird ? '3px solid #ffe66d' : '2px solid rgba(0, 0, 0, 0.1)',
+                          boxShadow: isTop 
+                            ? '0 8px 25px rgba(255, 107, 107, 0.4)' 
+                            : isSecond
+                            ? '0 6px 20px rgba(78, 205, 196, 0.3)'
+                            : isThird
+                            ? '0 6px 20px rgba(255, 230, 109, 0.3)'
+                            : '0 4px 12px rgba(0, 0, 0, 0.1)',
+                          transform: isTop ? 'scale(1.03)' : isSecond || isThird ? 'scale(1.01)' : 'none',
+                          transition: 'all 0.3s ease',
+                          position: 'relative',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        {/* Effet de brillance pour le top 3 */}
+                        {(isTop || isSecond || isThird) && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '-50%',
+                            left: '-50%',
+                            width: '200%',
+                            height: '200%',
+                            background: 'linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.3) 50%, transparent 70%)',
+                            animation: 'shine 3s infinite',
+                            pointerEvents: 'none'
+                          }} />
+                        )}
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                          {/* En-tête avec nom et emoji */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: isTop ? '36px' : isSecond || isThird ? '32px' : '28px' }}>
+                              {rankEmoji}
+                            </span>
+                            <div style={{ flex: 1 }}>
+                              <h3 style={{ 
+                                margin: 0,
+                                fontWeight: isTop ? '800' : isSecond || isThird ? '700' : '600', 
+                                fontSize: isTop ? '24px' : isSecond || isThird ? '22px' : '20px',
+                                color: isTop ? '#d63031' : isSecond ? '#00b894' : isThird ? '#fdcb6e' : '#333',
+                                textShadow: isTop ? '0 2px 4px rgba(0,0,0,0.2)' : 'none'
+                              }}>
+                                {stat.optionText}
+                              </h3>
+                              <p style={{ 
+                                margin: '5px 0 0 0',
+                                fontSize: '14px',
+                                color: isTop ? '#c0392b' : isSecond ? '#00a085' : isThird ? '#e17055' : '#666',
+                                fontStyle: 'italic',
+                                fontWeight: '500'
+                              }}>
+                                {stat.comment}
+                              </p>
+                            </div>
+                          </div>
+                          
+                          {/* Stats visuelles */}
+                          <div style={{ 
+                            display: 'flex', 
+                            gap: '15px', 
+                            alignItems: 'center', 
+                            flexWrap: 'wrap',
+                            padding: '15px',
+                            background: isTop ? 'rgba(255, 255, 255, 0.3)' : isSecond || isThird ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.03)',
+                            borderRadius: '10px'
+                          }}>
+                            {stat.first > 0 && (
+                              <div style={{ 
+                                textAlign: 'center',
+                                padding: '12px 20px',
+                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                borderRadius: '10px',
+                                color: 'white',
+                                boxShadow: '0 4px 10px rgba(102, 126, 234, 0.3)',
+                                minWidth: '100px'
+                              }}>
+                                <div style={{ fontSize: '32px', fontWeight: '800', lineHeight: '1', marginBottom: '5px' }}>
+                                  {stat.first}
+                                </div>
+                                <div style={{ fontSize: '13px', opacity: 0.95, fontWeight: '600' }}>
+                                  {stat.first === 1 ? 'fois 1er' : 'fois 1er'}
+                                </div>
+                              </div>
+                            )}
+                            {stat.second > 0 && (
+                              <div style={{ 
+                                textAlign: 'center',
+                                padding: '10px 18px',
+                                background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                                borderRadius: '10px',
+                                color: 'white',
+                                boxShadow: '0 4px 10px rgba(245, 87, 108, 0.3)',
+                                minWidth: '90px'
+                              }}>
+                                <div style={{ fontSize: '28px', fontWeight: '700', lineHeight: '1', marginBottom: '5px' }}>
+                                  {stat.second}
+                                </div>
+                                <div style={{ fontSize: '12px', opacity: 0.95, fontWeight: '600' }}>
+                                  {stat.second === 1 ? 'fois 2ème' : 'fois 2ème'}
+                                </div>
+                              </div>
+                            )}
+                            {stat.third > 0 && (
+                              <div style={{ 
+                                textAlign: 'center',
+                                padding: '10px 18px',
+                                background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+                                borderRadius: '10px',
+                                color: 'white',
+                                boxShadow: '0 4px 10px rgba(79, 172, 254, 0.3)',
+                                minWidth: '90px'
+                              }}>
+                                <div style={{ fontSize: '26px', fontWeight: '700', lineHeight: '1', marginBottom: '5px' }}>
+                                  {stat.third}
+                                </div>
+                                <div style={{ fontSize: '12px', opacity: 0.95, fontWeight: '600' }}>
+                                  {stat.third === 1 ? 'fois 3ème' : 'fois 3ème'}
+                                </div>
+                              </div>
+                            )}
+                            {stat.total > 0 && (
+                              <div style={{ 
+                                textAlign: 'center',
+                                padding: '12px 20px',
+                                background: isTop ? 'rgba(255, 255, 255, 0.9)' : isSecond || isThird ? 'rgba(255, 255, 255, 0.8)' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                borderRadius: '10px',
+                                color: isTop ? '#d63031' : isSecond ? '#00b894' : isThird ? '#e17055' : 'white',
+                                boxShadow: '0 4px 10px rgba(0, 0, 0, 0.2)',
+                                minWidth: '100px',
+                                fontWeight: '700'
+                              }}>
+                                <div style={{ fontSize: '30px', fontWeight: '800', lineHeight: '1', marginBottom: '5px' }}>
+                                  {stat.total}
+                                </div>
+                                <div style={{ fontSize: '13px', opacity: 0.9, fontWeight: '600' }}>
+                                  Total
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                {/* Style pour l'animation de brillance */}
+                <style>{`
+                  @keyframes shine {
+                    0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+                    100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+                  }
+                `}</style>
+              </div>
+            );
+          })()}
 
           {!isAdmin && (
             <div style={{
