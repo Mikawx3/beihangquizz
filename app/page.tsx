@@ -611,15 +611,41 @@ export default function Home() {
             if (participant && participant.answers && typeof participant.answers === 'object') {
               const answer = participant.answers[questionIndex];
               if (answer !== undefined && answer !== null && Array.isArray(answer)) {
-                stats.totalVotes++;
-                
-                // answer[position] = optionIndex
-                answer.forEach((optionIndex: number, position: number) => {
-                  if (!optionPositions[optionIndex]) {
-                    optionPositions[optionIndex] = [];
-                  }
-                  optionPositions[optionIndex].push(position);
-                });
+                // Vérifier que la réponse est valide (doit contenir toutes les options)
+                if (answer.length === question.options.length) {
+                  stats.totalVotes++;
+                  
+                  // answer[position] = optionIndex
+                  // Par exemple, si answer = [2, 0, 1], cela signifie:
+                  // - Position 0 (1ère place) : option index 2
+                  // - Position 1 (2ème place) : option index 0
+                  // - Position 2 (3ème place) : option index 1
+                  answer.forEach((optionIndex: number, position: number) => {
+                    // Valider que optionIndex est un nombre valide
+                    if (typeof optionIndex === 'number' && optionIndex >= 0 && optionIndex < question.options.length) {
+                      if (!optionPositions[optionIndex]) {
+                        optionPositions[optionIndex] = [];
+                      }
+                      optionPositions[optionIndex].push(position);
+                    } else {
+                      console.warn('⚠️ OptionIndex invalide dans la réponse ranking:', {
+                        optionIndex,
+                        position,
+                        answer,
+                        participantId: participant.id || 'unknown',
+                        questionIndex
+                      });
+                    }
+                  });
+                } else {
+                  console.warn('⚠️ Réponse ranking invalide (longueur incorrecte):', {
+                    answerLength: answer.length,
+                    expectedLength: question.options.length,
+                    answer,
+                    participantId: participant.id || 'unknown',
+                    questionIndex
+                  });
+                }
               }
             }
           });
@@ -629,12 +655,21 @@ export default function Home() {
           Object.keys(optionPositions).forEach((optionIndexStr) => {
             const optionIndex = parseInt(optionIndexStr);
             const positions = optionPositions[optionIndex];
-            const sum = positions.reduce((acc, pos) => acc + pos, 0);
-            const average = positions.length > 0 ? sum / positions.length : 0;
-            stats.rankingAverages[optionIndex] = {
-              average: average,
-              count: positions.length
-            };
+            if (positions.length > 0) {
+              const sum = positions.reduce((acc, pos) => acc + pos, 0);
+              const average = sum / positions.length;
+              stats.rankingAverages[optionIndex] = {
+                average: average,
+                count: positions.length
+              };
+            }
+          });
+          
+          console.log('📊 Statistiques ranking calculées:', {
+            questionIndex,
+            rankingAverages: stats.rankingAverages,
+            totalVotes: stats.totalVotes,
+            optionPositions
           });
         } else if (question.type === 'pairing') {
           // Pour pairing, compter tous les couples de tous les participants
@@ -894,6 +929,11 @@ export default function Home() {
       if (questionIndex >= 0 && questionIndex < questionsList.length) {
         console.log('✅ Affichage de la question:', questionIndex + 1);
         const question = questionsList[questionIndex];
+        
+        // RÉINITIALISER IMMÉDIATEMENT hasAnswered pour permettre la soumission de la nouvelle question
+        // Cela évite que les utilisateurs ne puissent pas répondre pendant la transition
+        setHasAnswered(false);
+        
         setCurrentQuestion(question);
         setCurrentQuestionIndex(questionIndex);
         setShowResults(false);
@@ -916,7 +956,10 @@ export default function Home() {
           setPairingTempSelection(null);
         }
         
-        // Vérifier si l'utilisateur a déjà répondu
+        // Réinitialiser selectedAnswer pour les questions multiple-choice
+        setSelectedAnswer(null);
+        
+        // Vérifier si l'utilisateur a déjà répondu (après avoir réinitialisé)
         if (name && name.trim() !== '') {
           const participantRef = doc(db, 'sessions', sid, 'participants', name);
           try {
@@ -926,7 +969,40 @@ export default function Home() {
               if (answers[questionIndex] !== undefined) {
                 setHasAnswered(true);
                 if (question.type === 'ranking' && Array.isArray(answers[questionIndex])) {
-                  setRankingOrder(answers[questionIndex]);
+                  const savedRanking = answers[questionIndex];
+                  // Valider que la réponse sauvegardée est valide
+                  if (savedRanking.length === question.options.length) {
+                    const sortedSavedRanking = [...savedRanking].sort((a, b) => a - b);
+                    const expectedIndices = question.options.map((_: any, index: number) => index);
+                    const isValidSavedRanking = sortedSavedRanking.every((val, idx) => val === expectedIndices[idx]);
+                    if (isValidSavedRanking) {
+                      setRankingOrder(savedRanking);
+                      console.log('✅ Réponse ranking chargée:', {
+                        questionIndex,
+                        savedRanking,
+                        question: question.question
+                      });
+                    } else {
+                      console.warn('⚠️ Réponse ranking invalide lors du chargement, réinitialisation:', {
+                        questionIndex,
+                        savedRanking,
+                        sortedSavedRanking,
+                        expectedIndices
+                      });
+                      const initialOrder = question.options.map((_: any, index: number) => index);
+                      setRankingOrder(initialOrder);
+                      setHasAnswered(false); // Permettre de recommencer
+                    }
+                  } else {
+                    console.warn('⚠️ Réponse ranking longueur incorrecte lors du chargement, réinitialisation:', {
+                      questionIndex,
+                      savedRankingLength: savedRanking.length,
+                      expectedLength: question.options.length
+                    });
+                    const initialOrder = question.options.map((_: any, index: number) => index);
+                    setRankingOrder(initialOrder);
+                    setHasAnswered(false); // Permettre de recommencer
+                  }
                                 } else if (question.type === 'pairing' && Array.isArray(answers[questionIndex])) {
                                   // Charger les couples existants
                                   const couples = answers[questionIndex];
@@ -1121,16 +1197,30 @@ export default function Home() {
       }
       
       if (data.questionTimerEndTime && !isResultsMode) {
-        const timerEndTime = data.questionTimerEndTime;
+        // Convertir questionTimerEndTime en nombre (gérer les cas où Firestore le stocke comme Timestamp)
+        let timerEndTime: number;
+        if (typeof data.questionTimerEndTime === 'number') {
+          timerEndTime = data.questionTimerEndTime;
+        } else if (data.questionTimerEndTime && typeof data.questionTimerEndTime.toMillis === 'function') {
+          // C'est un Timestamp Firestore
+          timerEndTime = data.questionTimerEndTime.toMillis();
+        } else if (data.questionTimerEndTime && typeof data.questionTimerEndTime.toDate === 'function') {
+          // C'est un Timestamp Firestore (autre format)
+          timerEndTime = data.questionTimerEndTime.toDate().getTime();
+        } else {
+          // Fallback : essayer de convertir en nombre
+          timerEndTime = Number(data.questionTimerEndTime);
+        }
+        
         const now = Date.now();
         const remaining = Math.max(0, Math.ceil((timerEndTime - now) / 1000));
-        if (remaining > 0) {
+        if (remaining > 0 && !isNaN(remaining)) {
           setQuestionTimer(remaining);
           // Mettre à jour le timer toutes les 100ms pour un affichage fluide
           timerIntervalRef.current = setInterval(() => {
             const now = Date.now();
             const remaining = Math.max(0, Math.ceil((timerEndTime - now) / 1000));
-            if (remaining > 0) {
+            if (remaining > 0 && !isNaN(remaining)) {
               setQuestionTimer(remaining);
             } else {
               setQuestionTimer(null);
@@ -1404,6 +1494,20 @@ export default function Home() {
         alert('Veuillez classer toutes les options');
         return;
       }
+      // Vérifier que tous les index de 0 à options.length-1 sont présents exactement une fois
+      const sortedOrder = [...rankingOrder].sort((a, b) => a - b);
+      const expectedIndices = currentQuestion.options.map((_: any, index: number) => index);
+      const isValidOrder = sortedOrder.every((val, idx) => val === expectedIndices[idx]);
+      if (!isValidOrder) {
+        console.error('❌ Erreur: rankingOrder invalide - index manquants ou dupliqués', {
+          rankingOrder,
+          sortedOrder,
+          expectedIndices,
+          questionIndex: currentQuestionIndex
+        });
+        alert('Erreur: Le classement contient des options manquantes ou dupliquées. Veuillez rafraîchir la page et réessayer.');
+        return;
+      }
     } else if (currentQuestion.type === 'pairing') {
       // Pour pairing, on doit avoir créé au moins un couple
       // On vérifie que toutes les personnes sont associées (ou presque, si impair)
@@ -1448,10 +1552,34 @@ export default function Home() {
       const answers = currentData?.answers || {};
       const currentScore = currentData?.score || 0;
 
-      const questionIndex = currentQuestion.id - 1;
+      // Utiliser currentQuestionIndex au lieu de currentQuestion.id - 1 pour éviter les problèmes de synchronisation
+      const questionIndex = currentQuestionIndex >= 0 ? currentQuestionIndex : (currentQuestion.id ? currentQuestion.id - 1 : -1);
+      
+      if (questionIndex < 0) {
+        console.error('❌ Impossible de déterminer l\'index de la question');
+        alert('Erreur : Impossible de déterminer la question actuelle. Veuillez rafraîchir la page.');
+        return;
+      }
+      
       let answer: any;
       if (currentQuestion.type === 'ranking') {
-        answer = rankingOrder;
+        // S'assurer que rankingOrder est un tableau valide avec toutes les options
+        if (!Array.isArray(rankingOrder) || rankingOrder.length !== currentQuestion.options.length) {
+          console.error('❌ Erreur: rankingOrder invalide lors de la soumission', {
+            rankingOrder,
+            optionsLength: currentQuestion.options.length,
+            questionIndex
+          });
+          alert('Erreur: Le classement est invalide. Veuillez rafraîchir la page et réessayer.');
+          return;
+        }
+        // Créer une copie pour s'assurer qu'on sauvegarde bien l'état actuel
+        answer = [...rankingOrder];
+        console.log('💾 Sauvegarde réponse ranking:', {
+          questionIndex,
+          rankingOrder: answer,
+          question: currentQuestion.question
+        });
       } else if (currentQuestion.type === 'pairing') {
         // Stocker tous les couples comme tableau plat [index1, index2, index3, index4, ...]
         // Firestore ne supporte pas les tableaux imbriqués, donc on utilise un tableau plat
