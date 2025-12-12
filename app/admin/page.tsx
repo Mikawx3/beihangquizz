@@ -10,6 +10,7 @@ import {
   getDocs,
   deleteDoc,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import Modal from '@/app/components/Modal';
@@ -20,6 +21,71 @@ interface Question {
   options: string[];
   correct: number;
 }
+
+// Fonction utilitaire pour nettoyer complètement une session (toutes les sous-collections)
+const cleanupSession = async (sessionId: string) => {
+  try {
+    console.log('🧹 Nettoyage de la session:', sessionId);
+    const sessionRef = doc(db, 'sessions', sessionId);
+    
+    // Supprimer tous les participants (même si le document de session n'existe pas)
+    try {
+      const participantsRef = collection(db, 'sessions', sessionId, 'participants');
+      const participantsSnapshot = await getDocs(participantsRef);
+      if (participantsSnapshot.size > 0) {
+        const batch1 = writeBatch(db);
+        participantsSnapshot.forEach((doc) => {
+          batch1.delete(doc.ref);
+        });
+        await batch1.commit();
+        console.log(`✅ ${participantsSnapshot.size} participant(s) supprimé(s)`);
+      }
+    } catch (error: any) {
+      // Si la collection n'existe pas, ce n'est pas grave
+      if (error?.code !== 'not-found') {
+        console.warn('⚠️ Erreur lors de la suppression des participants:', error);
+      }
+    }
+    
+    // Supprimer toutes les questions de session (même si le document de session n'existe pas)
+    try {
+      const questionsRef = collection(db, 'sessions', sessionId, 'questions');
+      const questionsSnapshot = await getDocs(questionsRef);
+      if (questionsSnapshot.size > 0) {
+        const batch2 = writeBatch(db);
+        questionsSnapshot.forEach((doc) => {
+          batch2.delete(doc.ref);
+        });
+        await batch2.commit();
+        console.log(`✅ ${questionsSnapshot.size} question(s) de session supprimée(s)`);
+      }
+    } catch (error: any) {
+      // Si la collection n'existe pas, ce n'est pas grave
+      if (error?.code !== 'not-found') {
+        console.warn('⚠️ Erreur lors de la suppression des questions:', error);
+      }
+    }
+    
+    // Supprimer le document de session principal (seulement s'il existe)
+    try {
+      const sessionDoc = await getDoc(sessionRef);
+      if (sessionDoc.exists()) {
+        await deleteDoc(sessionRef);
+        console.log('✅ Document de session supprimé');
+      }
+    } catch (error: any) {
+      // Si le document n'existe pas, ce n'est pas grave
+      if (error?.code !== 'not-found') {
+        console.warn('⚠️ Erreur lors de la suppression du document de session:', error);
+      }
+    }
+    
+    console.log('✅ Session complètement nettoyée');
+  } catch (error) {
+    console.error('❌ Erreur lors du nettoyage de la session:', error);
+    throw error;
+  }
+};
 
 export default function AdminPanel() {
   const [password, setPassword] = useState('');
@@ -541,8 +607,7 @@ export default function AdminPanel() {
                               `Êtes-vous sûr de vouloir supprimer la session "${session.id}" ?\n\nCette action est irréversible et supprimera toutes les données associées (participants, réponses, etc.).`,
                               async () => {
                                 try {
-                                  const sessionRef = doc(db, 'sessions', session.id);
-                                  await deleteDoc(sessionRef);
+                                  await cleanupSession(session.id);
                                   await loadSessions();
                                   showAlert('Succès', 'Session supprimée avec succès');
                                 } catch (error) {
@@ -669,18 +734,24 @@ export default function AdminPanel() {
                 }
                 
                 try {
-                  // Créer ou mettre à jour la session avec le sondage associé
+                  // TOUJOURS nettoyer la session avant de créer/réutiliser (même si elle n'existe pas encore)
+                  // Cela garantit qu'il n'y a pas de données résiduelles
+                  console.log('🧹 Nettoyage préventif de la session:', sessionIdInput.trim());
+                  await cleanupSession(sessionIdInput.trim());
+                  
+                  // Créer une nouvelle session propre avec le sondage associé
                   // Ne pas mettre adminName - il sera défini par le premier participant qui rejoint
                   const sessionRef = doc(db, 'sessions', sessionIdInput.trim());
-                  const sessionDoc = await getDoc(sessionRef);
-                  
                   await setDoc(sessionRef, {
                     surveyId: selectedSurveyId,
                     currentQuestionIndex: -1,
                     isActive: false,
-                    createdAt: sessionDoc.exists() ? sessionDoc.data().createdAt : new Date(),
+                    createdAt: new Date(),
+                    resultsMode: false,
+                    currentResultIndex: -1,
+                    questionTimerEndTime: null,
                     // Pas d'adminName ici - sera défini par le premier participant qui rejoint
-                  }, { merge: true });
+                  });
 
                   const selectedSurvey = surveys.find(s => s.id === selectedSurveyId);
                   const surveyName = selectedSurvey?.name || selectedSurveyId;

@@ -13,6 +13,7 @@ import {
   getDocs,
   updateDoc,
   deleteDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import Modal from '@/app/components/Modal';
@@ -31,6 +32,71 @@ const getOptionText = (option: string | Option): string => {
     return option;
   }
   return option.text;
+};
+
+// Fonction utilitaire pour nettoyer complètement une session (toutes les sous-collections)
+const cleanupSession = async (sessionId: string) => {
+  try {
+    console.log('🧹 Nettoyage de la session:', sessionId);
+    const sessionRef = doc(db, 'sessions', sessionId);
+    
+    // Supprimer tous les participants (même si le document de session n'existe pas)
+    try {
+      const participantsRef = collection(db, 'sessions', sessionId, 'participants');
+      const participantsSnapshot = await getDocs(participantsRef);
+      if (participantsSnapshot.size > 0) {
+        const batch1 = writeBatch(db);
+        participantsSnapshot.forEach((doc) => {
+          batch1.delete(doc.ref);
+        });
+        await batch1.commit();
+        console.log(`✅ ${participantsSnapshot.size} participant(s) supprimé(s)`);
+      }
+    } catch (error: any) {
+      // Si la collection n'existe pas, ce n'est pas grave
+      if (error?.code !== 'not-found') {
+        console.warn('⚠️ Erreur lors de la suppression des participants:', error);
+      }
+    }
+    
+    // Supprimer toutes les questions de session (même si le document de session n'existe pas)
+    try {
+      const questionsRef = collection(db, 'sessions', sessionId, 'questions');
+      const questionsSnapshot = await getDocs(questionsRef);
+      if (questionsSnapshot.size > 0) {
+        const batch2 = writeBatch(db);
+        questionsSnapshot.forEach((doc) => {
+          batch2.delete(doc.ref);
+        });
+        await batch2.commit();
+        console.log(`✅ ${questionsSnapshot.size} question(s) de session supprimée(s)`);
+      }
+    } catch (error: any) {
+      // Si la collection n'existe pas, ce n'est pas grave
+      if (error?.code !== 'not-found') {
+        console.warn('⚠️ Erreur lors de la suppression des questions:', error);
+      }
+    }
+    
+    // Supprimer le document de session principal (seulement s'il existe)
+    try {
+      const sessionDoc = await getDoc(sessionRef);
+      if (sessionDoc.exists()) {
+        await deleteDoc(sessionRef);
+        console.log('✅ Document de session supprimé');
+      }
+    } catch (error: any) {
+      // Si le document n'existe pas, ce n'est pas grave
+      if (error?.code !== 'not-found') {
+        console.warn('⚠️ Erreur lors de la suppression du document de session:', error);
+      }
+    }
+    
+    console.log('✅ Session complètement nettoyée');
+  } catch (error) {
+    console.error('❌ Erreur lors du nettoyage de la session:', error);
+    throw error;
+  }
 };
 
 // Fonction helper pour obtenir l'image d'une option
@@ -75,8 +141,20 @@ const getFunnyComment = (rank: number, total: number, votes: number, maxVotes: n
     if (isLast) {
       return '💪 Dernier mais pas le moins courageux !';
     }
+    if (rank > total * 0.8 && percentage < 3) {
+      return '🔥 En bas du panier mais tu brûles quand même !';
+    }
+    if (rank > total * 0.75 && votes === 1) {
+      return '💀 Un seul vote... Au moins quelqu\'un t\'aime !';
+    }
+    if (rank > total * 0.7 && percentage < 5) {
+      return '😬 Dans les profondeurs du classement... Courage !';
+    }
     if (percentage < 5) {
       return '🤷 Quelques votes, c\'est mieux que rien !';
+    }
+    if (rank > total * 0.6) {
+      return '📉 Ça descend... Mais tu restes debout !';
     }
     return '📊 Dans le classement, c\'est déjà bien !';
   }
@@ -132,8 +210,20 @@ const getFunnyComment = (rank: number, total: number, votes: number, maxVotes: n
     if (isLast) {
       return '💙 Derniers mais pas les moins courageux !';
     }
+    if (rank > total * 0.8 && percentage < 3) {
+      return '🔥 En bas du classement des couples... Mais l\'amour brûle encore !';
+    }
+    if (rank > total * 0.75 && votes === 1) {
+      return '💀 Un seul vote... Au moins quelqu\'un croit en votre couple !';
+    }
+    if (rank > total * 0.7 && percentage < 5) {
+      return '😬 Dans les profondeurs... Mais l\'amour résiste !';
+    }
     if (percentage < 5) {
       return '💜 Quelques votes, c\'est un début !';
+    }
+    if (rank > total * 0.6) {
+      return '📉 Ça descend pour le couple... Mais vous tenez bon !';
     }
     return '💚 Un couple qui mérite d\'être célébré !';
   }
@@ -1427,21 +1517,12 @@ export default function Home() {
           });
           console.log('✅ Admin transféré avec succès');
         } else {
-          // Plus de participants, supprimer la session
-          console.log('🗑️ Plus de participants, suppression de la session');
+          // Plus de participants, supprimer la session complètement
+          console.log('🗑️ Plus de participants, suppression complète de la session');
           
-          // Supprimer tous les participants d'abord (y compris celui qui quitte)
-          for (const participant of allParticipants) {
-            const partRef = doc(db, 'sessions', sessionId, 'participants', participant.id);
-            await deleteDoc(partRef);
-            if (participant.id === name) {
-              participantAlreadyDeleted = true;
-            }
-          }
-          
-          // Supprimer la session
-          await deleteDoc(sessionRef);
-          console.log('✅ Session supprimée');
+          // Utiliser la fonction de nettoyage complète
+          await cleanupSession(sessionId);
+          participantAlreadyDeleted = true; // Le participant a été supprimé dans cleanupSession
         }
       }
 
@@ -2370,24 +2451,38 @@ export default function Home() {
                                   borderRadius: '8px',
                                   border: '1px solid #e0e0e0',
                                   display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center'
+                                  flexDirection: 'column'
                                 }}
                               >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-                                  <span style={{ fontWeight: '600', color: '#667eea', minWidth: '30px' }}>
-                                    {item.rank + 1}.
-                                  </span>
-                                  <span>{item.optionText}</span>
-                                </div>
-                                <div style={{ textAlign: 'right', marginLeft: '15px' }}>
-                                  <div style={{ fontWeight: '600', color: '#555' }}>
-                                    {item.votes} vote{item.votes !== 1 ? 's' : ''}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                                    <span style={{ fontWeight: '600', color: '#667eea', minWidth: '30px' }}>
+                                      {item.rank + 1}.
+                                    </span>
+                                    <span>{item.optionText}</span>
                                   </div>
-                                  <div style={{ fontSize: '12px', color: '#999' }}>
-                                    {item.percentage.toFixed(1)}%
+                                  <div style={{ textAlign: 'right', marginLeft: '15px' }}>
+                                    <div style={{ fontWeight: '600', color: '#555' }}>
+                                      {item.votes} vote{item.votes !== 1 ? 's' : ''}
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#999' }}>
+                                      {item.percentage.toFixed(1)}%
+                                    </div>
                                   </div>
                                 </div>
+                                {/* Commentaire drôle */}
+                                {item.funnyComment && (
+                                  <div style={{
+                                    marginTop: '8px',
+                                    fontSize: '12px',
+                                    color: '#888',
+                                    fontStyle: 'italic',
+                                    paddingTop: '8px',
+                                    borderTop: '1px solid #f0f0f0'
+                                  }}>
+                                    {item.funnyComment}
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>

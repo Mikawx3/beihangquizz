@@ -11,6 +11,7 @@ import {
   getDocs,
   deleteDoc,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import Modal from '@/app/components/Modal';
 
@@ -20,6 +21,113 @@ interface Question {
   options: string[];
   type?: 'multiple-choice' | 'ranking'; // multiple-choice pour choix simple, ranking pour classement
 }
+
+  hasQCM: true,
+};
+
+// Fonction utilitaire pour nettoyer complètement une session (toutes les sous-collections)
+const cleanupSession = async (sessionId: string) => {
+  try {
+    console.log('🧹 Nettoyage de la session:', sessionId);
+    const sessionRef = doc(db, 'sessions', sessionId);
+    
+    // Supprimer tous les participants
+    const participantsRef = collection(db, 'sessions', sessionId, 'participants');
+    const participantsSnapshot = await getDocs(participantsRef);
+    const batch1 = writeBatch(db);
+    participantsSnapshot.forEach((doc) => {
+      batch1.delete(doc.ref);
+    });
+    if (participantsSnapshot.size > 0) {
+      await batch1.commit();
+      console.log(`✅ ${participantsSnapshot.size} participant(s) supprimé(s)`);
+    }
+    
+    // Supprimer toutes les questions de session (si elles existent)
+    const questionsRef = collection(db, 'sessions', sessionId, 'questions');
+    const questionsSnapshot = await getDocs(questionsRef);
+    const batch2 = writeBatch(db);
+    questionsSnapshot.forEach((doc) => {
+      batch2.delete(doc.ref);
+    });
+    if (questionsSnapshot.size > 0) {
+      await batch2.commit();
+      console.log(`✅ ${questionsSnapshot.size} question(s) de session supprimée(s)`);
+    }
+    
+    // Supprimer le document de session principal
+    await deleteDoc(sessionRef);
+    console.log('✅ Session complètement nettoyée');
+  } catch (error) {
+    console.error('❌ Erreur lors du nettoyage de la session:', error);
+    throw error;
+  }
+};
+
+// Fonction utilitaire pour nettoyer complètement une session (toutes les sous-collections)
+const cleanupSession = async (sessionId: string) => {
+  try {
+    console.log('🧹 Nettoyage de la session:', sessionId);
+    const sessionRef = doc(db, 'sessions', sessionId);
+    
+    // Supprimer tous les participants (même si le document de session n'existe pas)
+    try {
+      const participantsRef = collection(db, 'sessions', sessionId, 'participants');
+      const participantsSnapshot = await getDocs(participantsRef);
+      if (participantsSnapshot.size > 0) {
+        const batch1 = writeBatch(db);
+        participantsSnapshot.forEach((doc) => {
+          batch1.delete(doc.ref);
+        });
+        await batch1.commit();
+        console.log(`✅ ${participantsSnapshot.size} participant(s) supprimé(s)`);
+      }
+    } catch (error: any) {
+      // Si la collection n'existe pas, ce n'est pas grave
+      if (error?.code !== 'not-found') {
+        console.warn('⚠️ Erreur lors de la suppression des participants:', error);
+      }
+    }
+    
+    // Supprimer toutes les questions de session (même si le document de session n'existe pas)
+    try {
+      const questionsRef = collection(db, 'sessions', sessionId, 'questions');
+      const questionsSnapshot = await getDocs(questionsRef);
+      if (questionsSnapshot.size > 0) {
+        const batch2 = writeBatch(db);
+        questionsSnapshot.forEach((doc) => {
+          batch2.delete(doc.ref);
+        });
+        await batch2.commit();
+        console.log(`✅ ${questionsSnapshot.size} question(s) de session supprimée(s)`);
+      }
+    } catch (error: any) {
+      // Si la collection n'existe pas, ce n'est pas grave
+      if (error?.code !== 'not-found') {
+        console.warn('⚠️ Erreur lors de la suppression des questions:', error);
+      }
+    }
+    
+    // Supprimer le document de session principal (seulement s'il existe)
+    try {
+      const sessionDoc = await getDoc(sessionRef);
+      if (sessionDoc.exists()) {
+        await deleteDoc(sessionRef);
+        console.log('✅ Document de session supprimé');
+      }
+    } catch (error: any) {
+      // Si le document n'existe pas, ce n'est pas grave
+      if (error?.code !== 'not-found') {
+        console.warn('⚠️ Erreur lors de la suppression du document de session:', error);
+      }
+    }
+    
+    console.log('✅ Session complètement nettoyée');
+  } catch (error) {
+    console.error('❌ Erreur lors du nettoyage de la session:', error);
+    throw error;
+  }
+};
 
 export default function EditQCM() {
   const params = useParams();
@@ -110,6 +218,12 @@ export default function EditQCM() {
   // Créer la session si elle n'existe pas
   const createSession = async () => {
     try {
+      // TOUJOURS nettoyer la session avant de créer/réutiliser (même si elle n'existe pas encore)
+      // Cela garantit qu'il n'y a pas de données résiduelles
+      console.log('🧹 Nettoyage préventif de la session:', sessionId);
+      await cleanupSession(sessionId);
+      
+      // Créer une nouvelle session propre
       const sessionRef = doc(db, 'sessions', sessionId);
       await setDoc(sessionRef, {
         currentQuestionIndex: -1,
