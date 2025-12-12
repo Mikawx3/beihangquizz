@@ -224,3 +224,18 @@ h2 {
     font-size: 13px;
   }
 }
+
+/* Media queries pour le podium sur mobile */
+@media (max-width: 768px) {
+  /* Le podium s'adapte en colonne sur mobile */
+  .podium-container {
+    flex-direction: column !important;
+    align-items: center !important;
+  }
+  
+  .podium-item {
+    width: 100% !important;
+    max-width: 300px !important;
+    margin-bottom: 15px !important;
+  }
+}

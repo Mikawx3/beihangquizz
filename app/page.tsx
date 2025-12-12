@@ -104,7 +104,48 @@ const getFunnyComment = (rank: number, total: number, votes: number, maxVotes: n
     return '📊 Position moyenne, c\'est déjà ça !';
   }
   
+  if (type === 'pairing') {
+    if (isWinner && percentage > 50) {
+      return '💑 Le couple parfait ! Tout le monde vous voit ensemble !';
+    }
+    if (isWinner && percentage > 30) {
+      return '💕 Le couple préféré ! Vous êtes faits l\'un pour l\'autre !';
+    }
+    if (isWinner) {
+      return '💖 Couple gagnant ! L\'amour triomphe !';
+    }
+    if (rank === 1 && percentage > 20) {
+      return '💝 Presque premiers ! Un couple très apprécié !';
+    }
+    if (rank === 2) {
+      return '💗 Troisième place ! Un beau couple quand même !';
+    }
+    if (rank <= total / 3 && percentage > 10) {
+      return '💓 Dans le top tier des couples !';
+    }
+    if (rank <= total / 2 && percentage > 5) {
+      return '💞 Un couple qui a sa place !';
+    }
+    if (isLast && votes === 0) {
+      return '💔 Personne ne vous a mis ensemble... Mais l\'amour peut naître !';
+    }
+    if (isLast) {
+      return '💙 Derniers mais pas les moins courageux !';
+    }
+    if (percentage < 5) {
+      return '💜 Quelques votes, c\'est un début !';
+    }
+    return '💚 Un couple qui mérite d\'être célébré !';
+  }
+  
   return '💫 Un couple qui mérite d\'être célébré !';
+};
+
+// Fonction pour choisir un style d'affichage aléatoire
+const getDisplayStyle = (questionIndex: number): 'podium' | 'bars' | 'stars' | 'cards' => {
+  const styles: Array<'podium' | 'bars' | 'stars' | 'cards'> = ['podium', 'bars', 'stars', 'cards'];
+  // Utiliser l'index de la question pour avoir un style cohérent par question
+  return styles[questionIndex % styles.length];
 };
 
 // Le son (roulement de tambour) sera le même pour toutes les animations
@@ -2110,35 +2151,489 @@ export default function Home() {
                   )}
                 </div>
               ) : (
-                <div>
-                  <div style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'center',
-                    marginBottom: '20px',
-                    paddingBottom: '15px',
-                    borderBottom: '2px solid #e0e0e0'
-                  }}>
-                    <p style={{ color: '#666', margin: 0, fontSize: '16px', fontWeight: '600' }}>
-                      📊 Total de votes: <span style={{ color: '#667eea', fontSize: '18px' }}>{currentStat.totalVotes}</span>
-                    </p>
-                  </div>
-                  
-                  {currentStat.options && Array.isArray(currentStat.options) && 
-                    currentStat.options
-                      .map((option: string | Option, optIndex: number) => ({ option, optIndex }))
-                      .map(({ optIndex }: { option: string | Option; optIndex: number }) => optIndex)
-                      .sort((a: number, b: number) => {
-                        const votesA = currentStat.votes[a] || 0;
-                        const votesB = currentStat.votes[b] || 0;
-                        return votesB - votesA;
-                      })
-                      .map((optionIndex: number, rank: number) => {
-                        const votes = currentStat.votes[optionIndex] || 0;
-                        const percentage = currentStat.totalVotes > 0 ? (votes / currentStat.totalVotes) * 100 : 0;
-                        const option = currentStat.options[optionIndex];
-                        const optionText = getOptionText(option);
+                (() => {
+                  const displayStyle = getDisplayStyle(currentResultIndex);
+                  const sortedOptions = currentStat.options && Array.isArray(currentStat.options)
+                    ? currentStat.options
+                        .map((option: string | Option, optIndex: number) => ({ option, optIndex }))
+                        .map(({ optIndex }: { option: string | Option; optIndex: number }) => optIndex)
+                        .sort((a: number, b: number) => {
+                          const votesA = currentStat.votes[a] || 0;
+                          const votesB = currentStat.votes[b] || 0;
+                          return votesB - votesA;
+                        })
+                        .map((optionIndex: number, rank: number) => {
+                          const votes = currentStat.votes[optionIndex] || 0;
+                          const percentage = currentStat.totalVotes > 0 ? (votes / currentStat.totalVotes) * 100 : 0;
+                          const option = currentStat.options[optionIndex];
+                          const optionText = getOptionText(option);
+                          const maxVotes = Math.max(...Object.values(currentStat.votes) as number[]);
+                          const funnyComment = getFunnyComment(rank, currentStat.options.length, votes, maxVotes, 'multiple-choice');
+                          return { optionIndex, rank, votes, percentage, optionText, funnyComment };
+                        })
+                    : [];
+
+                  // Style PODIUM
+                  if (displayStyle === 'podium' && sortedOptions.length >= 3) {
+                    const topThree = sortedOptions.slice(0, 3);
+                    const rest = sortedOptions.slice(3);
+                    
+                    return (
+                      <div>
+                        <div style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center',
+                          marginBottom: '20px',
+                          paddingBottom: '15px',
+                          borderBottom: '2px solid #e0e0e0'
+                        }}>
+                          <p style={{ color: '#666', margin: 0, fontSize: '16px', fontWeight: '600' }}>
+                            📊 Total de votes: <span style={{ color: '#667eea', fontSize: '18px' }}>{currentStat.totalVotes}</span>
+                          </p>
+                        </div>
                         
+                        {/* Podium pour les top 3 */}
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'flex-end',
+                          gap: '15px',
+                          marginBottom: '30px',
+                          padding: '20px',
+                          background: 'linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%)',
+                          borderRadius: '15px',
+                          minHeight: '200px'
+                        }}>
+                          {/* 2ème place */}
+                          {topThree[1] && (
+                            <div style={{
+                              flex: '0 0 30%',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              order: 1
+                            }}>
+                              <div style={{
+                                background: 'linear-gradient(135deg, #C0C0C0 0%, #A0A0A0 100%)',
+                                padding: '15px',
+                                borderRadius: '12px 12px 0 0',
+                                width: '100%',
+                                textAlign: 'center',
+                                color: 'white',
+                                fontWeight: '600',
+                                fontSize: '14px',
+                                marginBottom: '5px',
+                                boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+                              }}>
+                                🥈 {topThree[1].optionText}
+                              </div>
+                              <div style={{
+                                background: 'linear-gradient(135deg, #C0C0C0 0%, #A0A0A0 100%)',
+                                height: '120px',
+                                width: '100%',
+                                borderRadius: '0 0 8px 8px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                color: 'white',
+                                fontWeight: '700',
+                                fontSize: '18px',
+                                boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+                              }}>
+                                <div>{topThree[1].votes} votes</div>
+                                <div style={{ fontSize: '14px', opacity: 0.9 }}>{topThree[1].percentage.toFixed(1)}%</div>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* 1ère place */}
+                          {topThree[0] && (
+                            <div style={{
+                              flex: '0 0 35%',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              order: 2
+                            }}>
+                              <div style={{
+                                background: 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)',
+                                padding: '18px',
+                                borderRadius: '12px 12px 0 0',
+                                width: '100%',
+                                textAlign: 'center',
+                                color: 'white',
+                                fontWeight: '700',
+                                fontSize: '16px',
+                                marginBottom: '5px',
+                                boxShadow: '0 6px 12px rgba(255, 215, 0, 0.4)'
+                              }}>
+                                🥇 {topThree[0].optionText}
+                              </div>
+                              <div style={{
+                                background: 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)',
+                                height: '160px',
+                                width: '100%',
+                                borderRadius: '0 0 8px 8px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                color: 'white',
+                                fontWeight: '700',
+                                fontSize: '22px',
+                                boxShadow: '0 6px 12px rgba(255, 215, 0, 0.4)'
+                              }}>
+                                <div>{topThree[0].votes} votes</div>
+                                <div style={{ fontSize: '16px', opacity: 0.9 }}>{topThree[0].percentage.toFixed(1)}%</div>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* 3ème place */}
+                          {topThree[2] && (
+                            <div style={{
+                              flex: '0 0 30%',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              order: 3
+                            }}>
+                              <div style={{
+                                background: 'linear-gradient(135deg, #CD7F32 0%, #B8860B 100%)',
+                                padding: '15px',
+                                borderRadius: '12px 12px 0 0',
+                                width: '100%',
+                                textAlign: 'center',
+                                color: 'white',
+                                fontWeight: '600',
+                                fontSize: '14px',
+                                marginBottom: '5px',
+                                boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+                              }}>
+                                🥉 {topThree[2].optionText}
+                              </div>
+                              <div style={{
+                                background: 'linear-gradient(135deg, #CD7F32 0%, #B8860B 100%)',
+                                height: '100px',
+                                width: '100%',
+                                borderRadius: '0 0 8px 8px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                color: 'white',
+                                fontWeight: '700',
+                                fontSize: '18px',
+                                boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
+                              }}>
+                                <div>{topThree[2].votes} votes</div>
+                                <div style={{ fontSize: '14px', opacity: 0.9 }}>{topThree[2].percentage.toFixed(1)}%</div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Commentaires pour le podium */}
+                        <div style={{ marginBottom: '20px', padding: '15px', background: '#f9f9f9', borderRadius: '10px' }}>
+                          {topThree[0] && (
+                            <div style={{ marginBottom: '10px', fontSize: '13px', fontStyle: 'italic', color: '#555' }}>
+                              🏆 {topThree[0].funnyComment}
+                            </div>
+                          )}
+                          {topThree[1] && (
+                            <div style={{ marginBottom: '10px', fontSize: '13px', fontStyle: 'italic', color: '#666' }}>
+                              🥈 {topThree[1].funnyComment}
+                            </div>
+                          )}
+                          {topThree[2] && (
+                            <div style={{ fontSize: '13px', fontStyle: 'italic', color: '#666' }}>
+                              🥉 {topThree[2].funnyComment}
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Le reste en dessous */}
+                        {rest.length > 0 && (
+                          <div>
+                            <h3 style={{ fontSize: '16px', color: '#666', marginBottom: '15px', textAlign: 'center' }}>
+                              Le reste du classement
+                            </h3>
+                            {rest.map((item) => (
+                              <div 
+                                key={item.optionIndex} 
+                                style={{ 
+                                  marginBottom: '12px',
+                                  padding: '12px',
+                                  background: 'white',
+                                  borderRadius: '8px',
+                                  border: '1px solid #e0e0e0',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                                  <span style={{ fontWeight: '600', color: '#667eea', minWidth: '30px' }}>
+                                    {item.rank + 1}.
+                                  </span>
+                                  <span>{item.optionText}</span>
+                                </div>
+                                <div style={{ textAlign: 'right', marginLeft: '15px' }}>
+                                  <div style={{ fontWeight: '600', color: '#555' }}>
+                                    {item.votes} vote{item.votes !== 1 ? 's' : ''}
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#999' }}>
+                                    {item.percentage.toFixed(1)}%
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  
+                  // Style STARS (étoiles)
+                  if (displayStyle === 'stars') {
+                    return (
+                      <div>
+                        <div style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center',
+                          marginBottom: '20px',
+                          paddingBottom: '15px',
+                          borderBottom: '2px solid #e0e0e0'
+                        }}>
+                          <p style={{ color: '#666', margin: 0, fontSize: '16px', fontWeight: '600' }}>
+                            ⭐ Total de votes: <span style={{ color: '#667eea', fontSize: '18px' }}>{currentStat.totalVotes}</span>
+                          </p>
+                        </div>
+                        
+                        {sortedOptions.map((item) => {
+                          const starCount = Math.ceil((item.percentage / 100) * 5); // 5 étoiles max
+                          const isTopThree = item.rank < 3;
+                          
+                          return (
+                            <div 
+                              key={item.optionIndex} 
+                              style={{ 
+                                marginBottom: isTopThree ? '20px' : '15px',
+                                padding: isTopThree ? '18px' : '15px',
+                                background: isTopThree ? 'linear-gradient(135deg, #fff9e6 0%, #ffe6cc 100%)' : 'white',
+                                borderRadius: '12px',
+                                border: isTopThree ? '2px solid #FFD700' : '1px solid #e0e0e0',
+                                boxShadow: isTopThree ? '0 4px 12px rgba(255, 215, 0, 0.2)' : '0 2px 4px rgba(0,0,0,0.05)',
+                              }}
+                            >
+                              <div style={{ 
+                                display: 'flex', 
+                                justifyContent: 'space-between', 
+                                alignItems: 'center',
+                                marginBottom: '10px'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+                                  <span style={{ 
+                                    fontSize: isTopThree ? '20px' : '16px',
+                                    fontWeight: '600',
+                                    minWidth: '35px',
+                                    textAlign: 'center'
+                                  }}>
+                                    {item.rank === 0 ? '🥇' : item.rank === 1 ? '🥈' : item.rank === 2 ? '🥉' : `${item.rank + 1}.`}
+                                  </span>
+                                  <span style={{ 
+                                    fontWeight: isTopThree ? '600' : '500',
+                                    fontSize: isTopThree ? '16px' : '15px',
+                                    color: '#333'
+                                  }}>
+                                    {item.optionText}
+                                  </span>
+                                </div>
+                                <div style={{ 
+                                  textAlign: 'right',
+                                  marginLeft: '15px'
+                                }}>
+                                  <div style={{ 
+                                    fontWeight: '700', 
+                                    color: isTopThree ? '#FFD700' : '#555',
+                                    fontSize: isTopThree ? '20px' : '18px'
+                                  }}>
+                                    {item.votes} vote{item.votes !== 1 ? 's' : ''}
+                                  </div>
+                                  <div style={{ 
+                                    fontSize: '14px',
+                                    color: '#999',
+                                    marginTop: '2px'
+                                  }}>
+                                    {item.percentage.toFixed(1)}%
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              {/* Barre d'étoiles */}
+                              <div style={{
+                                display: 'flex',
+                                gap: '5px',
+                                alignItems: 'center',
+                                marginBottom: '10px'
+                              }}>
+                                {Array.from({ length: 5 }).map((_, i) => (
+                                  <span 
+                                    key={i}
+                                    style={{
+                                      fontSize: '24px',
+                                      color: i < starCount ? '#FFD700' : '#e0e0e0',
+                                      transition: 'color 0.3s ease'
+                                    }}
+                                  >
+                                    ⭐
+                                  </span>
+                                ))}
+                                <span style={{ marginLeft: '10px', fontSize: '12px', color: '#999' }}>
+                                  {starCount}/5
+                                </span>
+                              </div>
+                              
+                              {/* Commentaire drôle */}
+                              <div style={{
+                                fontSize: '13px',
+                                color: isTopThree ? '#555' : '#888',
+                                fontStyle: 'italic',
+                                paddingTop: '8px',
+                                borderTop: '1px solid #f0f0f0',
+                                textAlign: 'left'
+                              }}>
+                                {item.funnyComment}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
+                  
+                  // Style CARDS (cartes)
+                  if (displayStyle === 'cards') {
+                    return (
+                      <div>
+                        <div style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center',
+                          marginBottom: '20px',
+                          paddingBottom: '15px',
+                          borderBottom: '2px solid #e0e0e0'
+                        }}>
+                          <p style={{ color: '#666', margin: 0, fontSize: '16px', fontWeight: '600' }}>
+                            🎴 Total de votes: <span style={{ color: '#667eea', fontSize: '18px' }}>{currentStat.totalVotes}</span>
+                          </p>
+                        </div>
+                        
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                          gap: '15px'
+                        }}>
+                          {sortedOptions.map((item) => {
+                            const isTopThree = item.rank < 3;
+                            const getCardColor = () => {
+                              if (item.rank === 0) return 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)';
+                              if (item.rank === 1) return 'linear-gradient(135deg, #C0C0C0 0%, #A0A0A0 100%)';
+                              if (item.rank === 2) return 'linear-gradient(135deg, #CD7F32 0%, #B8860B 100%)';
+                              return 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                            };
+                            
+                            return (
+                              <div 
+                                key={item.optionIndex} 
+                                style={{ 
+                                  padding: '20px',
+                                  background: getCardColor(),
+                                  borderRadius: '15px',
+                                  color: 'white',
+                                  boxShadow: isTopThree ? '0 6px 20px rgba(0,0,0,0.2)' : '0 4px 12px rgba(0,0,0,0.15)',
+                                  transform: isTopThree ? 'scale(1.05)' : 'scale(1)',
+                                  transition: 'transform 0.3s ease',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  justifyContent: 'space-between',
+                                  minHeight: '150px'
+                                }}
+                              >
+                                <div>
+                                  <div style={{ 
+                                    fontSize: '32px',
+                                    marginBottom: '10px',
+                                    textAlign: 'center'
+                                  }}>
+                                    {item.rank === 0 ? '🥇' : item.rank === 1 ? '🥈' : item.rank === 2 ? '🥉' : `${item.rank + 1}.`}
+                                  </div>
+                                  <div style={{ 
+                                    fontWeight: '700',
+                                    fontSize: '18px',
+                                    marginBottom: '15px',
+                                    textAlign: 'center',
+                                    textShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                                  }}>
+                                    {item.optionText}
+                                  </div>
+                                </div>
+                                
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ 
+                                    fontSize: '28px',
+                                    fontWeight: '700',
+                                    marginBottom: '5px',
+                                    textShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                                  }}>
+                                    {item.votes}
+                                  </div>
+                                  <div style={{ 
+                                    fontSize: '14px',
+                                    opacity: 0.9
+                                  }}>
+                                    vote{item.votes !== 1 ? 's' : ''} • {item.percentage.toFixed(1)}%
+                                  </div>
+                                  <div style={{
+                                    marginTop: '10px',
+                                    fontSize: '12px',
+                                    fontStyle: 'italic',
+                                    opacity: 0.95,
+                                    paddingTop: '10px',
+                                    borderTop: '1px solid rgba(255,255,255,0.3)'
+                                  }}>
+                                    {item.funnyComment}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  }
+                  
+                  // Style BARS (par défaut - barres de progression)
+                  return (
+                    <div>
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center',
+                        marginBottom: '20px',
+                        paddingBottom: '15px',
+                        borderBottom: '2px solid #e0e0e0'
+                      }}>
+                        <p style={{ color: '#666', margin: 0, fontSize: '16px', fontWeight: '600' }}>
+                          📊 Total de votes: <span style={{ color: '#667eea', fontSize: '18px' }}>{currentStat.totalVotes}</span>
+                        </p>
+                      </div>
+                      
+                      {sortedOptions.map((item) => {
+                        const isTopThree = item.rank < 3;
                         const getRankColor = (rank: number) => {
                           if (rank === 0) return 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)';
                           if (rank === 1) return 'linear-gradient(135deg, #C0C0C0 0%, #A0A0A0 100%)';
@@ -2153,19 +2648,15 @@ export default function Home() {
                           return `${rank + 1}.`;
                         };
                         
-                        const isTopThree = rank < 3;
-                        const maxVotes = Math.max(...Object.values(currentStat.votes) as number[]);
-                        const funnyComment = getFunnyComment(rank, currentStat.options.length, votes, maxVotes, 'multiple-choice');
-                        
                         return (
                           <div 
-                            key={optionIndex} 
+                            key={item.optionIndex} 
                             style={{ 
                               marginBottom: isTopThree ? '20px' : '15px',
                               padding: isTopThree ? '18px' : '15px',
                               background: isTopThree ? '#f9f9f9' : 'white',
                               borderRadius: '12px',
-                              border: isTopThree ? `3px solid ${rank === 0 ? '#FFD700' : rank === 1 ? '#C0C0C0' : '#CD7F32'}` : '1px solid #e0e0e0',
+                              border: isTopThree ? `3px solid ${item.rank === 0 ? '#FFD700' : item.rank === 1 ? '#C0C0C0' : '#CD7F32'}` : '1px solid #e0e0e0',
                               boxShadow: isTopThree ? '0 4px 12px rgba(0,0,0,0.1)' : '0 2px 4px rgba(0,0,0,0.05)',
                             }}
                           >
@@ -2182,14 +2673,14 @@ export default function Home() {
                                   minWidth: '35px',
                                   textAlign: 'center'
                                 }}>
-                                  {getRankEmoji(rank)}
+                                  {getRankEmoji(item.rank)}
                                 </span>
                                 <span style={{ 
                                   fontWeight: isTopThree ? '600' : '500',
                                   fontSize: isTopThree ? '16px' : '15px',
                                   color: '#333'
                                 }}>
-                                  {optionText}
+                                  {item.optionText}
                                 </span>
                               </div>
                               <div style={{ 
@@ -2201,14 +2692,14 @@ export default function Home() {
                                   color: isTopThree ? '#667eea' : '#555',
                                   fontSize: isTopThree ? '20px' : '18px'
                                 }}>
-                                  {votes} vote{votes !== 1 ? 's' : ''}
+                                  {item.votes} vote{item.votes !== 1 ? 's' : ''}
                                 </div>
                                 <div style={{ 
                                   fontSize: '14px',
                                   color: '#999',
                                   marginTop: '2px'
                                 }}>
-                                  {percentage.toFixed(1)}%
+                                  {item.percentage.toFixed(1)}%
                                 </div>
                               </div>
                             </div>
@@ -2225,23 +2716,23 @@ export default function Home() {
                             }}>
                               <div
                                 style={{
-                                  width: `${percentage}%`,
+                                  width: `${item.percentage}%`,
                                   height: '100%',
-                                  background: getRankColor(rank),
+                                  background: getRankColor(item.rank),
                                   transition: 'width 0.8s ease',
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'flex-end',
-                                  paddingRight: percentage > 8 ? '15px' : '5px',
+                                  paddingRight: item.percentage > 8 ? '15px' : '5px',
                                   color: 'white',
                                   fontSize: isTopThree ? '14px' : '12px',
                                   fontWeight: '700',
                                   boxShadow: isTopThree ? '0 2px 8px rgba(0,0,0,0.2)' : 'none',
                                 }}
                               >
-                                {percentage > 8 && (
+                                {item.percentage > 8 && (
                                   <span style={{ textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>
-                                    {percentage.toFixed(0)}%
+                                    {item.percentage.toFixed(0)}%
                                   </span>
                                 )}
                               </div>
@@ -2256,13 +2747,14 @@ export default function Home() {
                               borderTop: '1px solid #f0f0f0',
                               textAlign: 'left'
                             }}>
-                              {funnyComment}
+                              {item.funnyComment}
                             </div>
                           </div>
                         );
-                      })
-                  }
-                </div>
+                      })}
+                    </div>
+                  );
+                })()
               )}
             </div>
           ) : (
