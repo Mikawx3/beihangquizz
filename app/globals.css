@@ -185,4 +185,42 @@ h2 {
   margin-top: 5px;
 }
 
+/* Media queries pour mobile */
+@media (max-width: 600px) {
+  .container {
+    padding: 20px;
+  }
 
+  body {
+    padding: 10px;
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+
+  h2 {
+    font-size: 20px;
+  }
+
+  .button {
+    padding: 12px 20px;
+    font-size: 14px;
+  }
+
+  .quiz-option {
+    padding: 15px;
+  }
+}
+
+/* Media queries pour très petits écrans */
+@media (max-width: 400px) {
+  .container {
+    padding: 15px;
+  }
+
+  .button {
+    padding: 10px 15px;
+    font-size: 13px;
+  }
+}

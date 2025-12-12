@@ -40,8 +40,5 @@ questions-personnalisees.json
 reponses-personnalisees.json
 
 # images personnalisées (ne pas versionner les images téléchargées)
-public/images/*.png
-public/images/*.jpg
-public/images/*.jpeg
-public/images/*.gif
+
 !public/images/README.md

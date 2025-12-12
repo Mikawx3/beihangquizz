@@ -1663,7 +1663,14 @@ export default function Home() {
               )}
             </div>
             {isAdmin && (
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'row',
+                gap: '10px', 
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                width: '100%'
+              }}>
                 <button
                   onClick={handlePreviousResult}
                   disabled={currentResultIndex <= 0}
@@ -1673,9 +1680,17 @@ export default function Home() {
                       ? '#ccc'
                       : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                     cursor: currentResultIndex <= 0 ? 'not-allowed' : 'pointer',
-                    fontSize: '16px',
-                    padding: '15px 30px',
-                    fontWeight: '600'
+                    fontSize: 'clamp(14px, 4vw, 16px)',
+                    padding: 'clamp(12px, 3vw, 15px) clamp(20px, 5vw, 30px)',
+                    fontWeight: '600',
+                    flex: '1 1 auto',
+                    minWidth: '140px',
+                    whiteSpace: 'nowrap',
+                    touchAction: 'manipulation',
+                    WebkitTapHighlightColor: 'transparent',
+                    borderRadius: '8px',
+                    border: 'none',
+                    color: 'white'
                   }}
                 >
                   ⬅️ Résultat précédent
@@ -1689,9 +1704,17 @@ export default function Home() {
                       ? '#ccc'
                       : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                     cursor: currentResultIndex >= questions.length - 1 ? 'not-allowed' : 'pointer',
-                    fontSize: '16px',
-                    padding: '15px 30px',
-                    fontWeight: '600'
+                    fontSize: 'clamp(14px, 4vw, 16px)',
+                    padding: 'clamp(12px, 3vw, 15px) clamp(20px, 5vw, 30px)',
+                    fontWeight: '600',
+                    flex: '1 1 auto',
+                    minWidth: '140px',
+                    whiteSpace: 'nowrap',
+                    touchAction: 'manipulation',
+                    WebkitTapHighlightColor: 'transparent',
+                    borderRadius: '8px',
+                    border: 'none',
+                    color: 'white'
                   }}
                 >
                   {currentResultIndex >= questions.length - 1 ? '✅ Dernier résultat' : '➡️ Résultat suivant'}
