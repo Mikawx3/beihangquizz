@@ -22,48 +22,6 @@ interface Question {
   type?: 'multiple-choice' | 'ranking'; // multiple-choice pour choix simple, ranking pour classement
 }
 
-  hasQCM: true,
-};
-
-// Fonction utilitaire pour nettoyer complètement une session (toutes les sous-collections)
-const cleanupSession = async (sessionId: string) => {
-  try {
-    console.log('🧹 Nettoyage de la session:', sessionId);
-    const sessionRef = doc(db, 'sessions', sessionId);
-    
-    // Supprimer tous les participants
-    const participantsRef = collection(db, 'sessions', sessionId, 'participants');
-    const participantsSnapshot = await getDocs(participantsRef);
-    const batch1 = writeBatch(db);
-    participantsSnapshot.forEach((doc) => {
-      batch1.delete(doc.ref);
-    });
-    if (participantsSnapshot.size > 0) {
-      await batch1.commit();
-      console.log(`✅ ${participantsSnapshot.size} participant(s) supprimé(s)`);
-    }
-    
-    // Supprimer toutes les questions de session (si elles existent)
-    const questionsRef = collection(db, 'sessions', sessionId, 'questions');
-    const questionsSnapshot = await getDocs(questionsRef);
-    const batch2 = writeBatch(db);
-    questionsSnapshot.forEach((doc) => {
-      batch2.delete(doc.ref);
-    });
-    if (questionsSnapshot.size > 0) {
-      await batch2.commit();
-      console.log(`✅ ${questionsSnapshot.size} question(s) de session supprimée(s)`);
-    }
-    
-    // Supprimer le document de session principal
-    await deleteDoc(sessionRef);
-    console.log('✅ Session complètement nettoyée');
-  } catch (error) {
-    console.error('❌ Erreur lors du nettoyage de la session:', error);
-    throw error;
-  }
-};
-
 // Fonction utilitaire pour nettoyer complètement une session (toutes les sous-collections)
 const cleanupSession = async (sessionId: string) => {
   try {

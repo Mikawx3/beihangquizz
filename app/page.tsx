@@ -2624,7 +2624,7 @@ export default function Home() {
                             <h3 style={{ fontSize: '16px', color: '#666', marginBottom: '15px', textAlign: 'center' }}>
                               Le reste du classement
                             </h3>
-                            {rest.map((item) => (
+                            {rest.map((item: { optionIndex: number; optionText: string; votes: number; percentage: number; rank: number; funnyComment: string }) => (
                               <div 
                                 key={item.optionIndex} 
                                 style={{ 
@@ -2691,7 +2691,7 @@ export default function Home() {
                           </p>
                         </div>
                         
-                        {sortedOptions.map((item) => {
+                        {sortedOptions.map((item: { optionIndex: number; optionText: string; votes: number; percentage: number; rank: number; funnyComment: string }) => {
                           const starCount = Math.ceil((item.percentage / 100) * 5); // 5 étoiles max
                           const isTopThree = item.rank < 3;
                           
@@ -2815,7 +2815,7 @@ export default function Home() {
                           gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
                           gap: '15px'
                         }}>
-                          {sortedOptions.map((item) => {
+                          {sortedOptions.map((item: { optionIndex: number; optionText: string; votes: number; percentage: number; rank: number; funnyComment: string }) => {
                             const isTopThree = item.rank < 3;
                             const getCardColor = () => {
                               if (item.rank === 0) return 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)';
@@ -2910,7 +2910,7 @@ export default function Home() {
                         </p>
                       </div>
                       
-                      {sortedOptions.map((item) => {
+                      {sortedOptions.map((item: { optionIndex: number; optionText: string; votes: number; percentage: number; rank: number; funnyComment: string }) => {
                         const isTopThree = item.rank < 3;
                         const getRankColor = (rank: number) => {
                           if (rank === 0) return 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)';
@@ -3599,12 +3599,14 @@ export default function Home() {
                 </div>
                 
                 {/* Style pour l'animation de brillance */}
-                <style>{`
-                  @keyframes shine {
-                    0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
-                    100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
-                  }
-                `}</style>
+                <style dangerouslySetInnerHTML={{
+                  __html: `
+                    @keyframes shine {
+                      0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+                      100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+                    }
+                  `
+                }} />
               </div>
             );
           })()}
