@@ -2194,7 +2194,7 @@ export default function Home() {
                         </div>
                         
                         {/* Podium pour les top 3 */}
-                        <div style={{
+                        <div className="podium-container" style={{
                           display: 'flex',
                           justifyContent: 'center',
                           alignItems: 'flex-end',
