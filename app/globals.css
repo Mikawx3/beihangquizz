@@ -231,6 +231,7 @@ h2 {
   .podium-container {
     flex-direction: column !important;
     align-items: center !important;
+    min-height: auto !important;
   }
   
   .podium-item {

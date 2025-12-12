@@ -177,7 +177,9 @@ export default function RevealAnimation({
 
     // Choisir aléatoirement un son parmi ceux disponibles
     const randomSound = getRandomSound();
-    const audio = new Audio(randomSound);
+    // Encoder l'URL pour gérer les caractères spéciaux dans les noms de fichiers
+    const encodedSound = encodeURI(randomSound);
+    const audio = new Audio(encodedSound);
     audio.volume = 0.7;
     audio.loop = false; // Ne pas boucler, jouer une seule fois
     audioRef.current = audio;
@@ -191,7 +193,7 @@ export default function RevealAnimation({
         // Réessayer de jouer après le déblocage
         if (audioRef.current === audio) {
           await audio.play();
-          console.log(`Son aléatoire joué: ${randomSound}`);
+          console.log(`✅ Son aléatoire joué: ${randomSound}`);
           
           // Arrêter le son après 2 secondes
           soundTimeoutRef.current = setTimeout(() => {
@@ -202,8 +204,8 @@ export default function RevealAnimation({
           }, 2000);
         }
       } catch (err) {
-        console.warn('Fichier audio non trouvé ou erreur de lecture:', err);
-        console.log(`Impossible de jouer le son: ${randomSound}`);
+        console.warn('⚠️ Fichier audio non trouvé ou erreur de lecture:', err);
+        console.log(`❌ Impossible de jouer le son: ${randomSound}`);
         // Le son ne jouera pas mais l'animation continuera
       }
     };
