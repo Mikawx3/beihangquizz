@@ -112,3 +112,4 @@ Si vous ne voyez pas ces logs, vérifiez :
 2. Que les filtres de la console ne masquent pas les logs
 3. Que JavaScript n'est pas désactivé
 
+

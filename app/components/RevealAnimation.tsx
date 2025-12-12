@@ -22,6 +22,44 @@ const AVAILABLE_SOUNDS = [
   '/sounds/paul.mp3',
 ];
 
+// Contexte audio global pour iOS - sera activé lors de la première interaction utilisateur
+let audioContextActivated = false;
+let audioContextUnlockPromise: Promise<void> | null = null;
+
+// Fonction pour activer le contexte audio (nécessaire pour iOS)
+const unlockAudioContext = async (): Promise<void> => {
+  if (audioContextActivated) {
+    return Promise.resolve();
+  }
+
+  if (audioContextUnlockPromise) {
+    return audioContextUnlockPromise;
+  }
+
+  audioContextUnlockPromise = (async () => {
+    try {
+      // Créer un audio silencieux pour débloquer le contexte audio
+      const silentAudio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE=');
+      silentAudio.volume = 0.01;
+      silentAudio.preload = 'auto';
+      
+      try {
+        await silentAudio.play();
+        await silentAudio.pause();
+        silentAudio.currentTime = 0;
+        audioContextActivated = true;
+        console.log('✅ Contexte audio activé pour iOS');
+      } catch (e) {
+        console.warn('⚠️ Impossible d\'activer le contexte audio:', e);
+      }
+    } catch (e) {
+      console.warn('⚠️ Erreur lors de l\'activation du contexte audio:', e);
+    }
+  })();
+
+  return audioContextUnlockPromise;
+};
+
 // Fonction pour choisir aléatoirement un son parmi ceux disponibles
 // Utilise Math.random() pour une vraie randomisation à chaque appel
 const getRandomSound = (): string => {
@@ -31,12 +69,32 @@ const getRandomSound = (): string => {
   return selectedSound;
 };
 
+// Fonction helper pour normaliser les chemins d'images (pour Vercel)
+const normalizeImagePath = (imagePath: string | undefined): string | undefined => {
+  if (!imagePath) {
+    return undefined;
+  }
+  
+  // Si c'est déjà une URL complète (http/https), la retourner telle quelle
+  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+    return imagePath;
+  }
+  
+  // Si le chemin commence par /, le retourner tel quel (chemin absolu)
+  if (imagePath.startsWith('/')) {
+    return imagePath;
+  }
+  
+  // Sinon, ajouter / au début pour en faire un chemin absolu depuis la racine
+  return `/${imagePath}`;
+};
+
 // Fonction helper pour obtenir l'image d'une option
 const getOptionImage = (option: string | Option): string | undefined => {
   if (typeof option === 'string') {
     return undefined;
   }
-  return option.image;
+  return normalizeImagePath(option.image);
 };
 
 export default function RevealAnimation({
@@ -122,16 +180,22 @@ export default function RevealAnimation({
     // Essayer de charger et jouer le son
     const playAudio = async () => {
       try {
-        await audio.play();
-        console.log(`Son aléatoire joué: ${randomSound}`);
+        // Débloquer le contexte audio pour iOS avant de jouer
+        await unlockAudioContext();
         
-        // Arrêter le son après 2 secondes
-        soundTimeoutRef.current = setTimeout(() => {
-          if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.currentTime = 0;
-          }
-        }, 2000);
+        // Réessayer de jouer après le déblocage
+        if (audioRef.current === audio) {
+          await audio.play();
+          console.log(`Son aléatoire joué: ${randomSound}`);
+          
+          // Arrêter le son après 2 secondes
+          soundTimeoutRef.current = setTimeout(() => {
+            if (audioRef.current) {
+              audioRef.current.pause();
+              audioRef.current.currentTime = 0;
+            }
+          }, 2000);
+        }
       } catch (err) {
         console.warn('Fichier audio non trouvé ou erreur de lecture:', err);
         console.log(`Impossible de jouer le son: ${randomSound}`);
@@ -147,9 +211,9 @@ export default function RevealAnimation({
     audio.load();
     
     // Fallback si l'événement ne se déclenche pas
-    fallbackTimeoutRef.current = setTimeout(() => {
+    fallbackTimeoutRef.current = setTimeout(async () => {
       if (audio.readyState >= 2 && audioRef.current === audio) {
-        playAudio();
+        await playAudio();
       }
     }, 100);
 
@@ -179,12 +243,15 @@ export default function RevealAnimation({
     
     // Si winnerImage2 est présent, c'est un couple (pairing)
     if (winnerImage2) {
-      // Pour les couples, utiliser les deux images
-      if (winnerImage) availableImages.push(winnerImage);
-      if (winnerImage2) availableImages.push(winnerImage2);
+      // Pour les couples, utiliser les deux images (normalisées)
+      const normalizedImage1 = normalizeImagePath(winnerImage);
+      const normalizedImage2 = normalizeImagePath(winnerImage2);
+      if (normalizedImage1) availableImages.push(normalizedImage1);
+      if (normalizedImage2) availableImages.push(normalizedImage2);
     } else if (winnerImage) {
-      // Pour les autres types, utiliser uniquement l'image du gagnant
-      availableImages.push(winnerImage);
+      // Pour les autres types, utiliser uniquement l'image du gagnant (normalisée)
+      const normalizedImage = normalizeImagePath(winnerImage);
+      if (normalizedImage) availableImages.push(normalizedImage);
     }
     
     // Si aucune image n'est disponible, ne pas créer d'images flottantes
@@ -583,7 +650,7 @@ export default function RevealAnimation({
           }}
         >
           <img
-            src={winnerImage}
+            src={normalizeImagePath(winnerImage) || ''}
             alt={winnerName}
             style={{
               width: winnerImage2 ? '300px' : '100%',
@@ -592,7 +659,11 @@ export default function RevealAnimation({
               filter: 'drop-shadow(0 0 30px rgba(255, 255, 255, 0.8))',
             }}
             onError={(e) => {
+              console.warn('Image non chargée:', winnerImage);
               (e.target as HTMLImageElement).style.display = 'none';
+            }}
+            onLoad={() => {
+              console.log('Image chargée avec succès:', winnerImage);
             }}
           />
           {winnerImage2 && (
@@ -606,7 +677,7 @@ export default function RevealAnimation({
                 &
               </span>
               <img
-                src={winnerImage2}
+                src={normalizeImagePath(winnerImage2) || ''}
                 alt=""
                 style={{
                   width: '300px',
@@ -615,7 +686,11 @@ export default function RevealAnimation({
                   filter: 'drop-shadow(0 0 30px rgba(255, 255, 255, 0.8))',
                 }}
                 onError={(e) => {
+                  console.warn('Image non chargée:', winnerImage2);
                   (e.target as HTMLImageElement).style.display = 'none';
+                }}
+                onLoad={() => {
+                  console.log('Image chargée avec succès:', winnerImage2);
                 }}
               />
             </>

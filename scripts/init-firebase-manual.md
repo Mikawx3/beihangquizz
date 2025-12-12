@@ -94,3 +94,4 @@ Après l'initialisation, vérifiez que :
 2. La collection `questions` existe avec au moins quelques questions
 3. Vous pouvez vous connecter au panneau admin avec le mot de passe
 
+

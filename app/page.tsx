@@ -76,6 +76,7 @@ export default function Home() {
   const router = useRouter();
   const hasCheckedLocalStorage = useRef(false); // Pour éviter les vérifications multiples du localStorage
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null); // Référence pour l'intervalle du timer
+  const audioContextActivatedRef = useRef(false); // Pour éviter d'activer plusieurs fois le contexte audio
   
   // États pour les modals
   const [modalState, setModalState] = useState<{
@@ -1488,6 +1489,54 @@ export default function Home() {
     };
   }, []);
 
+  // Activer le contexte audio pour iOS lors de la première interaction utilisateur
+  useEffect(() => {
+    if (audioContextActivatedRef.current) {
+      return;
+    }
+
+    const activateAudio = async () => {
+      try {
+        // Créer un audio silencieux pour débloquer le contexte audio
+        const silentAudio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE=');
+        silentAudio.volume = 0.01;
+        silentAudio.preload = 'auto';
+        
+        const playAndPause = async () => {
+          try {
+            await silentAudio.play();
+            await silentAudio.pause();
+            silentAudio.currentTime = 0;
+            audioContextActivatedRef.current = true;
+            console.log('✅ Contexte audio activé pour iOS');
+          } catch (e) {
+            // Ignorer les erreurs silencieusement
+          }
+        };
+
+        // Écouter les événements de clic et de toucher pour activer l'audio
+        const events = ['click', 'touchstart', 'touchend', 'keydown'];
+        const handleInteraction = async () => {
+          if (!audioContextActivatedRef.current) {
+            await playAndPause();
+            // Retirer les listeners après activation
+            events.forEach(event => {
+              document.removeEventListener(event, handleInteraction);
+            });
+          }
+        };
+
+        events.forEach(event => {
+          document.addEventListener(event, handleInteraction, { once: true, passive: true });
+        });
+      } catch (e) {
+        console.warn('⚠️ Erreur lors de l\'activation du contexte audio:', e);
+      }
+    };
+
+    activateAudio();
+  }, []);
+
   // Écran de connexion
   if (!sessionId) {
     return (
@@ -2691,37 +2740,33 @@ export default function Home() {
 
   // Écran de question
   const timerDuration = 10; // Durée totale du timer en secondes
-  const progressPercentage = questionTimer !== null && questionTimer > 0 
-    ? ((timerDuration - questionTimer) / timerDuration) * 100 
-    : 0;
 
   return (
     <>
-      {/* Barre de progression fixe en haut de l'écran */}
+      {/* Compte à rebours fixe en haut à droite de l'écran */}
       {questionTimer !== null && questionTimer > 0 && (
         <div style={{
           position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: '6px',
-          backgroundColor: '#e0e0e0',
+          top: '10px',
+          right: '10px',
           zIndex: 9999,
-          width: '100%'
+          padding: '8px 16px',
+          borderRadius: '8px',
+          backgroundColor: questionTimer <= 3 ? '#f44336' : questionTimer <= 5 ? '#ff9800' : '#4caf50',
+          color: 'white',
+          fontSize: '24px',
+          fontWeight: 'bold',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+          transition: 'background-color 0.3s ease',
+          // Assurer la visibilité sur iPhone avec safe-area-inset
+          paddingTop: 'max(8px, env(safe-area-inset-top))',
+          paddingRight: 'max(16px, env(safe-area-inset-right))',
         }}>
-          <div style={{
-            height: '100%',
-            width: `${progressPercentage}%`,
-            backgroundColor: questionTimer <= 3 ? '#f44336' : questionTimer <= 5 ? '#ff9800' : '#4caf50',
-            transition: 'width 0.1s linear, background-color 0.3s ease',
-            borderRadius: '0 3px 3px 0'
-          }} />
+          {questionTimer}
         </div>
       )}
 
-      <div className="container" style={{
-        paddingTop: questionTimer !== null && questionTimer > 0 ? '6px' : '0'
-      }}>
+      <div className="container">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h1>📊 Beihang Sondage</h1>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px' }}>
@@ -2782,63 +2827,134 @@ export default function Home() {
             {currentQuestion.type === 'ranking' ? (
               <div>
                 <p style={{ fontSize: '14px', color: '#666', marginBottom: '15px', fontStyle: 'italic' }}>
-                  Cliquez et glissez pour réorganiser les options dans l&apos;ordre souhaité :
+                  Utilisez les flèches pour réorganiser les options dans l&apos;ordre souhaité :
                 </p>
-                {rankingOrder.map((optionIndex, displayIndex) => (
-                  <div
-                    key={optionIndex}
-                    draggable={!hasAnswered && !isSpectator}
-                    onDragStart={(e) => {
-                      if (!hasAnswered && !isSpectator) {
-                        e.dataTransfer.setData('text/plain', String(displayIndex));
-                      }
-                    }}
-                    onDragOver={(e) => {
-                      if (!hasAnswered && !isSpectator) {
-                        e.preventDefault();
-                      }
-                    }}
-                    onDrop={(e) => {
-                      if (!hasAnswered && !isSpectator) {
-                        e.preventDefault();
-                        const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
-                        const newOrder = [...rankingOrder];
-                        const [removed] = newOrder.splice(draggedIndex, 1);
-                        newOrder.splice(displayIndex, 0, removed);
-                        setRankingOrder(newOrder);
-                      }
-                    }}
-                    className={`quiz-option ${hasAnswered ? '' : 'ranking-item'}`}
-                    style={{
-                      cursor: hasAnswered ? 'default' : 'move',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '15px',
-                      marginBottom: '10px',
-                      padding: '15px',
-                      background: '#f9f9f9',
-                      border: '2px solid #e0e0e0',
-                    }}
-                  >
-                    <span style={{
-                      background: '#667eea',
-                      color: 'white',
-                      borderRadius: '50%',
-                      width: '32px',
-                      height: '32px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '16px',
-                      fontWeight: '600',
-                      flexShrink: 0
-                    }}>
-                      {displayIndex + 1}
-                    </span>
-                    <span style={{ flex: 1 }}>{getOptionText(currentQuestion.options[optionIndex])}</span>
-                    {!hasAnswered && <span style={{ color: '#999', fontSize: '18px' }}>⋮⋮</span>}
-                  </div>
-                ))}
+                {rankingOrder.map((optionIndex, displayIndex) => {
+                  const moveUp = () => {
+                    if (displayIndex > 0 && !hasAnswered && !isSpectator) {
+                      const newOrder = [...rankingOrder];
+                      [newOrder[displayIndex - 1], newOrder[displayIndex]] = [newOrder[displayIndex], newOrder[displayIndex - 1]];
+                      setRankingOrder(newOrder);
+                    }
+                  };
+                  
+                  const moveDown = () => {
+                    if (displayIndex < rankingOrder.length - 1 && !hasAnswered && !isSpectator) {
+                      const newOrder = [...rankingOrder];
+                      [newOrder[displayIndex], newOrder[displayIndex + 1]] = [newOrder[displayIndex + 1], newOrder[displayIndex]];
+                      setRankingOrder(newOrder);
+                    }
+                  };
+
+                  return (
+                    <div
+                      key={optionIndex}
+                      draggable={!hasAnswered && !isSpectator}
+                      onDragStart={(e) => {
+                        if (!hasAnswered && !isSpectator) {
+                          e.dataTransfer.setData('text/plain', String(displayIndex));
+                        }
+                      }}
+                      onDragOver={(e) => {
+                        if (!hasAnswered && !isSpectator) {
+                          e.preventDefault();
+                        }
+                      }}
+                      onDrop={(e) => {
+                        if (!hasAnswered && !isSpectator) {
+                          e.preventDefault();
+                          const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                          const newOrder = [...rankingOrder];
+                          const [removed] = newOrder.splice(draggedIndex, 1);
+                          newOrder.splice(displayIndex, 0, removed);
+                          setRankingOrder(newOrder);
+                        }
+                      }}
+                      className={`quiz-option ${hasAnswered ? '' : 'ranking-item'}`}
+                      style={{
+                        cursor: hasAnswered ? 'default' : 'move',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '15px',
+                        marginBottom: '10px',
+                        padding: '15px',
+                        background: '#f9f9f9',
+                        border: '2px solid #e0e0e0',
+                      }}
+                    >
+                      <span style={{
+                        background: '#667eea',
+                        color: 'white',
+                        borderRadius: '50%',
+                        width: '32px',
+                        height: '32px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '16px',
+                        fontWeight: '600',
+                        flexShrink: 0
+                      }}>
+                        {displayIndex + 1}
+                      </span>
+                      <span style={{ flex: 1 }}>{getOptionText(currentQuestion.options[optionIndex])}</span>
+                      {!hasAnswered && !isSpectator && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0 }}>
+                          <button
+                            onClick={moveUp}
+                            disabled={displayIndex === 0}
+                            style={{
+                              background: displayIndex === 0 ? '#e0e0e0' : '#667eea',
+                              color: displayIndex === 0 ? '#999' : 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              width: '36px',
+                              height: '36px',
+                              fontSize: '20px',
+                              cursor: displayIndex === 0 ? 'not-allowed' : 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: 0,
+                              touchAction: 'manipulation', // Améliore la réactivité sur mobile
+                              WebkitTapHighlightColor: 'transparent', // Retire le highlight sur iOS
+                            }}
+                            onTouchStart={(e) => {
+                              e.stopPropagation(); // Empêche le drag sur mobile
+                            }}
+                          >
+                            ▲
+                          </button>
+                          <button
+                            onClick={moveDown}
+                            disabled={displayIndex === rankingOrder.length - 1}
+                            style={{
+                              background: displayIndex === rankingOrder.length - 1 ? '#e0e0e0' : '#667eea',
+                              color: displayIndex === rankingOrder.length - 1 ? '#999' : 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              width: '36px',
+                              height: '36px',
+                              fontSize: '20px',
+                              cursor: displayIndex === rankingOrder.length - 1 ? 'not-allowed' : 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: 0,
+                              touchAction: 'manipulation', // Améliore la réactivité sur mobile
+                              WebkitTapHighlightColor: 'transparent', // Retire le highlight sur iOS
+                            }}
+                            onTouchStart={(e) => {
+                              e.stopPropagation(); // Empêche le drag sur mobile
+                            }}
+                          >
+                            ▼
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ) : currentQuestion.type === 'pairing' ? (
               <div>
