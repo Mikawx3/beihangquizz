@@ -251,6 +251,7 @@ export default function Home() {
   const [rankingOrder, setRankingOrder] = useState<number[]>([]); // Ordre pour les questions de type ranking
   const [pairingSelection, setPairingSelection] = useState<Array<[number, number]>>([]); // Couples sélectionnés pour les questions de type pairing
   const [pairingTempSelection, setPairingTempSelection] = useState<number | null>(null); // Première personne sélectionnée temporairement pour créer un couple
+  const [categorizationAnswers, setCategorizationAnswers] = useState<{ [key: number]: number }>({}); // Réponses de catégorisation: { personIndex: categoryIndex } où categoryIndex = 0 (catégorie A) ou 1 (catégorie B)
   const [hasAnswered, setHasAnswered] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [results, setResults] = useState<any[]>([]);
@@ -703,6 +704,39 @@ export default function Home() {
           });
           
           stats.coupleVotes = coupleVotes;
+        } else if (question.type === 'categorization') {
+          // Pour categorization, compter pour chaque personne dans quelle catégorie elle est classée
+          const personCategories: { [key: number]: { categoryA: number; categoryB: number } } = {};
+          
+          // Initialiser toutes les personnes
+          question.options.forEach((_: any, index: number) => {
+            personCategories[index] = { categoryA: 0, categoryB: 0 };
+          });
+          
+          results.forEach((participant: any) => {
+            if (participant && participant.answers && typeof participant.answers === 'object') {
+              const answer = participant.answers[questionIndex];
+              if (answer !== undefined && answer !== null && typeof answer === 'object' && !Array.isArray(answer)) {
+                stats.totalVotes++;
+                
+                // answer est un objet { personIndex: categoryIndex } où categoryIndex = 0 (catégorie A) ou 1 (catégorie B)
+                Object.keys(answer).forEach((personIndexStr) => {
+                  const personIndex = parseInt(personIndexStr);
+                  const categoryIndex = answer[personIndex];
+                  
+                  if (typeof personIndex === 'number' && personIndex >= 0 && personIndex < question.options.length) {
+                    if (categoryIndex === 0) {
+                      personCategories[personIndex].categoryA++;
+                    } else if (categoryIndex === 1) {
+                      personCategories[personIndex].categoryB++;
+                    }
+                  }
+                });
+              }
+            }
+          });
+          
+          stats.personCategories = personCategories;
         } else {
           // Pour multiple-choice
           results.forEach((participant: any) => {
@@ -956,6 +990,13 @@ export default function Home() {
           setPairingTempSelection(null);
         }
         
+        // Initialiser les réponses de catégorisation
+        if (question.type === 'categorization') {
+          setCategorizationAnswers({});
+        } else {
+          setCategorizationAnswers({});
+        }
+        
         // Réinitialiser selectedAnswer pour les questions multiple-choice
         setSelectedAnswer(null);
         
@@ -1018,6 +1059,9 @@ export default function Home() {
                                       setPairingSelection(loadedCouples);
                                     }
                                   }
+                                } else if (question.type === 'categorization' && answers[questionIndex] && typeof answers[questionIndex] === 'object' && !Array.isArray(answers[questionIndex])) {
+                                  // Charger les réponses de catégorisation
+                                  setCategorizationAnswers(answers[questionIndex]);
                                 } else {
                   setSelectedAnswer(answers[questionIndex]);
                 }
@@ -1030,6 +1074,10 @@ export default function Home() {
                 } else if (question.type === 'pairing') {
                   setPairingSelection([]);
                   setPairingTempSelection(null);
+                } else if (question.type === 'categorization') {
+                  setCategorizationAnswers({});
+                } else if (question.type === 'categorization') {
+                  setCategorizationAnswers({});
                 }
               }
             }
@@ -1480,6 +1528,9 @@ export default function Home() {
 
   // Soumettre une réponse
   const handleSubmitAnswer = async () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/56000035-2b1e-4b09-8741-9c55323fd7ed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/page.tsx:1530',message:'handleSubmitAnswer appelée',data:{hasSessionId:!!sessionId,hasCurrentQuestion:!!currentQuestion,questionType:currentQuestion?.type,isSpectator},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     if (!sessionId || !currentQuestion) return;
     
     // Empêcher la soumission si on est en mode spectateur
@@ -1535,6 +1586,9 @@ export default function Home() {
           return;
         }
       }
+    } else if (currentQuestion.type === 'categorization') {
+      // Pour categorization, la validation se fait plus bas dans la fonction
+      // On ne fait rien ici, on laisse passer pour atteindre la validation plus bas
     } else {
       if (selectedAnswer === null) return;
     }
@@ -1562,7 +1616,28 @@ export default function Home() {
       }
       
       let answer: any;
-      if (currentQuestion.type === 'ranking') {
+      if (currentQuestion.type === 'categorization') {
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/56000035-2b1e-4b09-8741-9c55323fd7ed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/page.tsx:1613',message:'Validation categorization - AVANT',data:{optionsLength:currentQuestion.options?.length,optionsIsArray:Array.isArray(currentQuestion.options),categorizationAnswers,questionIndex},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        // Vérifier que toutes les personnes ont été classées
+        const allClassified = currentQuestion.options.every((_: any, index: number) => 
+          categorizationAnswers[index] === 0 || categorizationAnswers[index] === 1
+        );
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/56000035-2b1e-4b09-8741-9c55323fd7ed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/page.tsx:1618',message:'Validation categorization - APRÈS',data:{allClassified,optionsLength:currentQuestion.options?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        if (!allClassified) {
+          alert('Veuillez classer toutes les personnes dans l\'une des deux catégories');
+          return;
+        }
+        answer = categorizationAnswers;
+        console.log('💾 Sauvegarde réponse categorization:', {
+          questionIndex,
+          categorizationAnswers: answer,
+          question: currentQuestion.question
+        });
+      } else if (currentQuestion.type === 'ranking') {
         // S'assurer que rankingOrder est un tableau valide avec toutes les options
         if (!Array.isArray(rankingOrder) || rankingOrder.length !== currentQuestion.options.length) {
           console.error('❌ Erreur: rankingOrder invalide lors de la soumission', {
@@ -1598,6 +1673,10 @@ export default function Home() {
         answers,
         score: newScore,
       });
+
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/56000035-2b1e-4b09-8741-9c55323fd7ed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/page.tsx:1665',message:'Réponse sauvegardée avec succès',data:{questionIndex,questionType:currentQuestion.type,answerSaved:!!answers[questionIndex]},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
 
       setHasAnswered(true);
     } catch (error) {
@@ -2539,6 +2618,97 @@ export default function Home() {
                   ) : (
                     <div style={{ fontSize: '14px', color: '#999', fontStyle: 'italic' }}>
                       Aucun couple n&apos;a été sélectionné.
+                    </div>
+                  )}
+                </div>
+              ) : currentStat.type === 'categorization' ? (
+                <div>
+                  <p style={{ color: '#666', marginBottom: '20px', fontSize: '16px', fontWeight: '600' }}>
+                    Réponses reçues: {currentStat.totalVotes}
+                  </p>
+                  {currentStat.personCategories && currentStat.options && Array.isArray(currentStat.options) && currentStat.options.length > 0 ? (
+                    <div>
+                      {currentStat.options.map((option: string | Option, personIndex: number) => {
+                        const categoryData = currentStat.personCategories[personIndex];
+                        if (!categoryData) return null;
+                        
+                        const totalVotes = categoryData.categoryA + categoryData.categoryB;
+                        const isMoreA = categoryData.categoryA > categoryData.categoryB;
+                        const isMoreB = categoryData.categoryB > categoryData.categoryA;
+                        const isEqual = categoryData.categoryA === categoryData.categoryB;
+                        const question = questions[currentResultIndex];
+                        const categoryA = question?.categoryA || 'Catégorie A';
+                        const categoryB = question?.categoryB || 'Catégorie B';
+                        const percentageA = totalVotes > 0 ? (categoryData.categoryA / totalVotes) * 100 : 0;
+                        const percentageB = totalVotes > 0 ? (categoryData.categoryB / totalVotes) * 100 : 0;
+                        
+                        return (
+                          <div
+                            key={personIndex}
+                            style={{
+                              marginBottom: '15px',
+                              padding: '15px',
+                              background: isMoreA ? '#e3f2fd' : isMoreB ? '#fff3e0' : '#f5f5f5',
+                              borderRadius: '8px',
+                              border: isMoreA ? '2px solid #2196f3' : isMoreB ? '2px solid #ff9800' : '2px solid #e0e0e0'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                              <div style={{ fontWeight: '600', fontSize: '16px', color: '#333' }}>
+                                {getOptionText(option)}
+                              </div>
+                              <div style={{ fontSize: '14px', color: '#666' }}>
+                                {totalVotes} réponse{totalVotes !== 1 ? 's' : ''}
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                              <div style={{ flex: 1, padding: '10px', background: '#e3f2fd', borderRadius: '6px', textAlign: 'center' }}>
+                                <div style={{ fontWeight: '600', color: '#1976d2', marginBottom: '5px' }}>
+                                  {categoryA}
+                                </div>
+                                <div style={{ fontSize: '20px', fontWeight: '700', color: '#1976d2' }}>
+                                  {categoryData.categoryA}
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                                  ({percentageA.toFixed(1)}%)
+                                </div>
+                              </div>
+                              <div style={{ flex: 1, padding: '10px', background: '#fff3e0', borderRadius: '6px', textAlign: 'center' }}>
+                                <div style={{ fontWeight: '600', color: '#f57c00', marginBottom: '5px' }}>
+                                  {categoryB}
+                                </div>
+                                <div style={{ fontSize: '20px', fontWeight: '700', color: '#f57c00' }}>
+                                  {categoryData.categoryB}
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                                  ({percentageB.toFixed(1)}%)
+                                </div>
+                              </div>
+                            </div>
+                            {totalVotes > 0 && (
+                              <div style={{ 
+                                marginTop: '10px', 
+                                padding: '8px', 
+                                background: isMoreA ? '#2196f3' : isMoreB ? '#ff9800' : '#9e9e9e',
+                                borderRadius: '6px',
+                                color: 'white',
+                                textAlign: 'center',
+                                fontWeight: '600',
+                                fontSize: '14px'
+                              }}>
+                                {isEqual 
+                                  ? `Égalité entre ${categoryA} et ${categoryB}`
+                                  : `Plus classé dans ${isMoreA ? categoryA : categoryB}`
+                                }
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '14px', color: '#999', fontStyle: 'italic' }}>
+                      Aucune réponse disponible.
                     </div>
                   )}
                 </div>
@@ -4068,6 +4238,99 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+              ) : stat.type === 'categorization' ? (
+                <div>
+                  <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>
+                    Réponses reçues: {stat.totalVotes}
+                  </p>
+                  {stat.personCategories && stat.options && Array.isArray(stat.options) && stat.options.length > 0 ? (
+                    <div>
+                      {(() => {
+                        const question = questions[idx];
+                        const categoryA = question?.categoryA || 'Catégorie A';
+                        const categoryB = question?.categoryB || 'Catégorie B';
+                        return stat.options.map((option: string | Option, personIndex: number) => {
+                          const categoryData = stat.personCategories[personIndex];
+                          if (!categoryData) return null;
+                          
+                          const totalVotes = categoryData.categoryA + categoryData.categoryB;
+                          const isMoreA = categoryData.categoryA > categoryData.categoryB;
+                          const isMoreB = categoryData.categoryB > categoryData.categoryA;
+                          const isEqual = categoryData.categoryA === categoryData.categoryB;
+                          const percentageA = totalVotes > 0 ? (categoryData.categoryA / totalVotes) * 100 : 0;
+                          const percentageB = totalVotes > 0 ? (categoryData.categoryB / totalVotes) * 100 : 0;
+                          
+                          return (
+                            <div
+                              key={personIndex}
+                              style={{
+                                marginBottom: '15px',
+                                padding: '15px',
+                                background: isMoreA ? '#e3f2fd' : isMoreB ? '#fff3e0' : '#f5f5f5',
+                                borderRadius: '8px',
+                                border: isMoreA ? '2px solid #2196f3' : isMoreB ? '2px solid #ff9800' : '2px solid #e0e0e0'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                <div style={{ fontWeight: '600', fontSize: '16px', color: '#333' }}>
+                                  {getOptionText(option)}
+                                </div>
+                                <div style={{ fontSize: '14px', color: '#666' }}>
+                                  {totalVotes} réponse{totalVotes !== 1 ? 's' : ''}
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                                <div style={{ flex: 1, padding: '10px', background: '#e3f2fd', borderRadius: '6px', textAlign: 'center' }}>
+                                  <div style={{ fontWeight: '600', color: '#1976d2', marginBottom: '5px' }}>
+                                    {categoryA}
+                                  </div>
+                                  <div style={{ fontSize: '20px', fontWeight: '700', color: '#1976d2' }}>
+                                    {categoryData.categoryA}
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                                    ({percentageA.toFixed(1)}%)
+                                  </div>
+                                </div>
+                                <div style={{ flex: 1, padding: '10px', background: '#fff3e0', borderRadius: '6px', textAlign: 'center' }}>
+                                  <div style={{ fontWeight: '600', color: '#f57c00', marginBottom: '5px' }}>
+                                    {categoryB}
+                                  </div>
+                                  <div style={{ fontSize: '20px', fontWeight: '700', color: '#f57c00' }}>
+                                    {categoryData.categoryB}
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                                    ({percentageB.toFixed(1)}%)
+                                  </div>
+                                </div>
+                              </div>
+                              {totalVotes > 0 && (
+                                <div style={{ 
+                                  marginTop: '10px', 
+                                  padding: '8px', 
+                                  background: isMoreA ? '#2196f3' : isMoreB ? '#ff9800' : '#9e9e9e',
+                                  borderRadius: '6px',
+                                  color: 'white',
+                                  textAlign: 'center',
+                                  fontWeight: '600',
+                                  fontSize: '14px'
+                                }}>
+                                  {isEqual 
+                                    ? `Égalité entre ${categoryA} et ${categoryB}`
+                                    : `Plus classé dans ${isMoreA ? categoryA : categoryB}`
+                                  }
+                                </div>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '14px', color: '#999', fontStyle: 'italic' }}>
+                      Aucune réponse disponible.
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div>
                   <div style={{ 
@@ -4650,6 +4913,110 @@ export default function Home() {
                   </div>
                 )}
               </div>
+            ) : currentQuestion.type === 'categorization' ? (
+              <div>
+                <p style={{ fontSize: '14px', color: '#666', marginBottom: '20px', fontStyle: 'italic' }}>
+                  Classez chaque personne dans l&apos;une des deux catégories :
+                </p>
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: '1fr 1fr', 
+                  gap: '15px', 
+                  marginBottom: '20px',
+                  padding: '15px',
+                  background: '#f5f5f5',
+                  borderRadius: '8px'
+                }}>
+                  <div style={{ textAlign: 'center', padding: '10px', background: '#e3f2fd', borderRadius: '8px' }}>
+                    <div style={{ fontWeight: '600', fontSize: '16px', color: '#1976d2', marginBottom: '5px' }}>
+                      {currentQuestion.categoryA || 'Catégorie A'}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'center', padding: '10px', background: '#fff3e0', borderRadius: '8px' }}>
+                    <div style={{ fontWeight: '600', fontSize: '16px', color: '#f57c00', marginBottom: '5px' }}>
+                      {currentQuestion.categoryB || 'Catégorie B'}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {currentQuestion.options.map((option: string | Option, personIndex: number) => {
+                    const category = categorizationAnswers[personIndex]; // 0 = catégorie A, 1 = catégorie B
+                    return (
+                      <div
+                        key={personIndex}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '15px',
+                          padding: '15px',
+                          background: category === 0 ? '#e3f2fd' : category === 1 ? '#fff3e0' : '#f9f9f9',
+                          border: `2px solid ${category === 0 ? '#2196f3' : category === 1 ? '#ff9800' : '#e0e0e0'}`,
+                          borderRadius: '8px',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        <div style={{ flex: 1, fontWeight: '500' }}>
+                          {getOptionText(option)}
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                          <button
+                            onClick={() => {
+                              // #region agent log
+                              fetch('http://127.0.0.1:7244/ingest/56000035-2b1e-4b09-8741-9c55323fd7ed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/page.tsx:4946',message:'Clic catégorie A',data:{personIndex,hasAnswered,isSpectator,currentAnswers:categorizationAnswers},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                              // #endregion
+                              if (!hasAnswered && !isSpectator) {
+                                setCategorizationAnswers({
+                                  ...categorizationAnswers,
+                                  [personIndex]: 0
+                                });
+                              }
+                            }}
+                            disabled={hasAnswered || isSpectator}
+                            style={{
+                              padding: '8px 16px',
+                              background: category === 0 ? '#2196f3' : '#e0e0e0',
+                              color: category === 0 ? 'white' : '#666',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: hasAnswered || isSpectator ? 'not-allowed' : 'pointer',
+                              fontWeight: category === 0 ? '600' : 'normal',
+                              transition: 'all 0.2s ease'
+                            }}
+                          >
+                            {currentQuestion.categoryA || 'Catégorie A'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              // #region agent log
+                              fetch('http://127.0.0.1:7244/ingest/56000035-2b1e-4b09-8741-9c55323fd7ed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/page.tsx:4969',message:'Clic catégorie B',data:{personIndex,hasAnswered,isSpectator,currentAnswers:categorizationAnswers},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                              // #endregion
+                              if (!hasAnswered && !isSpectator) {
+                                setCategorizationAnswers({
+                                  ...categorizationAnswers,
+                                  [personIndex]: 1
+                                });
+                              }
+                            }}
+                            disabled={hasAnswered || isSpectator}
+                            style={{
+                              padding: '8px 16px',
+                              background: category === 1 ? '#ff9800' : '#e0e0e0',
+                              color: category === 1 ? 'white' : '#666',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: hasAnswered || isSpectator ? 'not-allowed' : 'pointer',
+                              fontWeight: category === 1 ? '600' : 'normal',
+                              transition: 'all 0.2s ease'
+                            }}
+                          >
+                            {currentQuestion.categoryB || 'Catégorie B'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             ) : (
               currentQuestion.options.map((option: string | Option, index: number) => (
                 <div
@@ -4665,21 +5032,29 @@ export default function Home() {
             )}
           </div>
 
-          {!hasAnswered && !isSpectator && (
-            <button 
-              onClick={handleSubmitAnswer}
-              className="button" 
-              disabled={
-                currentQuestion.type === 'ranking' 
-                  ? rankingOrder.length === 0 || rankingOrder.length !== currentQuestion.options.length
-                  : currentQuestion.type === 'pairing'
-                  ? pairingSelection.length === 0
-                  : selectedAnswer === null
-              }
-            >
-              Soumettre la réponse
-            </button>
-          )}
+          {!hasAnswered && !isSpectator && (() => {
+            // #region agent log
+            const isDisabled = currentQuestion.type === 'ranking' 
+              ? rankingOrder.length === 0 || rankingOrder.length !== currentQuestion.options.length
+              : currentQuestion.type === 'pairing'
+              ? pairingSelection.length === 0
+              : currentQuestion.type === 'categorization'
+              ? !currentQuestion.options.every((_: any, index: number) => categorizationAnswers[index] === 0 || categorizationAnswers[index] === 1)
+              : selectedAnswer === null;
+            if (currentQuestion.type === 'categorization') {
+              fetch('http://127.0.0.1:7244/ingest/56000035-2b1e-4b09-8741-9c55323fd7ed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/page.tsx:5016',message:'Évaluation disabled bouton',data:{isDisabled,optionsLength:currentQuestion.options?.length,optionsIsArray:Array.isArray(currentQuestion.options),categorizationAnswers,everyResult:currentQuestion.options?.map((_: any, index: number) => ({index,hasAnswer:categorizationAnswers[index] === 0 || categorizationAnswers[index] === 1}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+            }
+            // #endregion
+            return (
+              <button 
+                onClick={handleSubmitAnswer}
+                className="button" 
+                disabled={isDisabled}
+              >
+                Soumettre la réponse
+              </button>
+            );
+          })()}
           {isSpectator && (
             <div style={{
               padding: '15px',
