@@ -23,8 +23,10 @@ interface Question {
   id: string;
   question: string;
   options: (string | Option)[]; // Supporte les strings simples (rétrocompatibilité) ou des objets Option
-  type?: 'multiple-choice' | 'ranking' | 'pairing';
+  type?: 'multiple-choice' | 'ranking' | 'pairing' | 'categorization';
   optionsRef?: string; // Référence à une liste partagée
+  categoryA?: string; // Nom de la première catégorie (pour type categorization)
+  categoryB?: string; // Nom de la deuxième catégorie (pour type categorization)
 }
 
 // Fonction helper pour normaliser les options (convertir string en Option si nécessaire)
@@ -58,12 +60,18 @@ const cleanOption = (option: string | Option): string | Option => {
 
 // Fonction helper pour nettoyer une question avant sauvegarde
 const cleanQuestionForSave = (question: Omit<Question, 'id'>): Omit<Question, 'id'> => {
-  return {
+  const cleaned: Omit<Question, 'id'> = {
     question: question.question,
     options: question.options.map(cleanOption),
     type: question.type || 'multiple-choice',
     optionsRef: question.optionsRef || undefined,
   };
+  // Ajouter categoryA et categoryB seulement si c'est une question de type categorization
+  if (question.type === 'categorization') {
+    cleaned.categoryA = question.categoryA || 'Catégorie A';
+    cleaned.categoryB = question.categoryB || 'Catégorie B';
+  }
+  return cleaned;
 };
 
 export default function EditSurvey() {
@@ -80,6 +88,8 @@ export default function EditSurvey() {
     question: '',
     options: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }],
     type: 'multiple-choice',
+    categoryA: 'Catégorie A',
+    categoryB: 'Catégorie B',
   });
   const [rankingOrder, setRankingOrder] = useState<number[]>([]);
   const [surveyExists, setSurveyExists] = useState(false);
@@ -246,8 +256,12 @@ export default function EditSurvey() {
       // Fonction helper pour parser les options d'une question
       const parseOptions = (q: any, sharedOpts: Record<string, (string | Option)[]>): (string | Option)[] => {
         // Si la question référence une liste partagée
-        if (q.optionsRef && sharedOpts[q.optionsRef]) {
-          return sharedOpts[q.optionsRef].map(normalizeOptionFromJson);
+        if (q.optionsRef) {
+          if (sharedOpts[q.optionsRef]) {
+            return sharedOpts[q.optionsRef].map(normalizeOptionFromJson);
+          } else {
+            return [];
+          }
         }
         
         // Sinon, utiliser les options directement définies
@@ -273,8 +287,10 @@ export default function EditSurvey() {
             return {
               question: q.question || q.text || '',
               options: options,
-              type: questionType as 'multiple-choice' | 'ranking' | 'pairing',
+              type: questionType as 'multiple-choice' | 'ranking' | 'pairing' | 'categorization',
               optionsRef: q.optionsRef || undefined,
+              categoryA: q.categoryA || undefined,
+              categoryB: q.categoryB || undefined,
             };
           });
       }
@@ -289,8 +305,10 @@ export default function EditSurvey() {
             return {
               question: q.question || q.text || '',
               options: options,
-              type: questionType as 'multiple-choice' | 'ranking' | 'pairing',
+              type: questionType as 'multiple-choice' | 'ranking' | 'pairing' | 'categorization',
               optionsRef: q.optionsRef || undefined,
+              categoryA: q.categoryA || undefined,
+              categoryB: q.categoryB || undefined,
             };
           });
       }
@@ -302,7 +320,9 @@ export default function EditSurvey() {
         questionsToAdd = [{
           question: parsed.question || parsed.text || '',
           options: options,
-          type: (questionType === 'ranking' ? 'ranking' : questionType === 'pairing' ? 'pairing' : 'multiple-choice') as 'multiple-choice' | 'ranking' | 'pairing',
+          type: (questionType === 'ranking' ? 'ranking' : questionType === 'pairing' ? 'pairing' : questionType === 'categorization' ? 'categorization' : 'multiple-choice') as 'multiple-choice' | 'ranking' | 'pairing' | 'categorization',
+          categoryA: parsed.categoryA || undefined,
+          categoryB: parsed.categoryB || undefined,
           optionsRef: parsed.optionsRef || undefined,
         }];
       }
@@ -395,6 +415,8 @@ export default function EditSurvey() {
         question: '',
         options: [{ text: '' }, { text: '' }, { text: '' }, { text: '' }],
         type: 'multiple-choice',
+        categoryA: 'Catégorie A',
+        categoryB: 'Catégorie B',
       });
       setRankingOrder([]);
       showAlert('Succès', editingQuestion ? 'Question modifiée avec succès' : 'Question ajoutée avec succès');
@@ -445,6 +467,8 @@ export default function EditSurvey() {
       question: question.question,
       options: question.options.map(opt => normalizeOption(opt)),
       type: question.type || 'multiple-choice',
+      categoryA: question.categoryA || 'Catégorie A',
+      categoryB: question.categoryB || 'Catégorie B',
     });
     if (question.type === 'ranking') {
       const initialOrder = question.options.map((_, i) => i);
@@ -606,6 +630,7 @@ export default function EditSurvey() {
                   <br />• <code>&quot;multiple-choice&quot;</code> : Choix multiple
                   <br />• <code>&quot;ranking&quot;</code> : Classement/Tri
                   <br />• <code>&quot;pairing&quot;</code> : Association de couples (sélectionner deux personnes)
+                  <br />• <code>&quot;categorization&quot;</code> : Catégorisation (classer chaque personne dans l&apos;une de deux catégories) - nécessite <code>categoryA</code> et <code>categoryB</code>
                   <br />
                   <br /><strong>Listes de réponses partagées :</strong>
                   <br />Vous pouvez définir des listes de réponses partagées dans <code>sharedOptions</code> et les référencer dans les questions avec <code>optionsRef</code>.
@@ -711,7 +736,7 @@ export default function EditSurvey() {
                         Question {index + 1}: {question.question}
                       </div>
                       <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
-                        Type: {question.type === 'ranking' ? 'Classement / Tri' : question.type === 'pairing' ? 'Association de couples' : 'Choix multiple'}
+                        Type: {question.type === 'ranking' ? 'Classement / Tri' : question.type === 'pairing' ? 'Association de couples' : question.type === 'categorization' ? 'Catégorisation (2 catégories)' : 'Choix multiple'}
                         {question.optionsRef && (
                           <span style={{ marginLeft: '10px', color: '#1976d2', fontWeight: '600' }}>
                             📎 Liste partagée: &quot;{question.optionsRef}&quot;
@@ -719,23 +744,42 @@ export default function EditSurvey() {
                         )}
                       </div>
                       <div style={{ marginLeft: '15px' }}>
-                        {question.options.map((option, optIndex) => {
-                          const opt = normalizeOption(option);
-                          return (
-                            <div
-                              key={optIndex}
-                              style={{
-                                padding: '6px',
-                                margin: '4px 0',
-                                background: '#f5f5f5',
-                                borderRadius: '5px',
-                                fontSize: '14px'
-                              }}
-                            >
-                              {optIndex + 1}. {opt.text}
-                            </div>
-                          );
-                        })}
+                        {question.options && question.options.length > 0 ? (
+                          question.options.map((option, optIndex) => {
+                            const opt = normalizeOption(option);
+                            return (
+                              <div
+                                key={optIndex}
+                                style={{
+                                  padding: '6px',
+                                  margin: '4px 0',
+                                  background: '#f5f5f5',
+                                  borderRadius: '5px',
+                                  fontSize: '14px'
+                                }}
+                              >
+                                {optIndex + 1}. {opt.text}
+                                {opt.image && (
+                                  <span style={{ marginLeft: '8px', color: '#999', fontSize: '12px' }}>
+                                    (image: {opt.image})
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div style={{ 
+                            padding: '8px', 
+                            margin: '4px 0', 
+                            background: '#fff3cd', 
+                            borderRadius: '5px', 
+                            fontSize: '13px',
+                            color: '#856404',
+                            fontStyle: 'italic'
+                          }}>
+                            ⚠️ Aucune option trouvée. {question.optionsRef ? `Vérifiez que la référence "${question.optionsRef}" existe dans sharedOptions.` : 'Les options doivent être définies.'}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -792,7 +836,7 @@ export default function EditSurvey() {
                 <select
                   value={newQuestion.type}
                   onChange={(e) => {
-                    const newType = e.target.value as 'multiple-choice' | 'ranking' | 'pairing';
+                    const newType = e.target.value as 'multiple-choice' | 'ranking' | 'pairing' | 'categorization';
                     setNewQuestion({ ...newQuestion, type: newType });
                     if (newType === 'ranking') {
                       const initialOrder = newQuestion.options.map((_, index) => index);
@@ -813,6 +857,7 @@ export default function EditSurvey() {
                   <option value="multiple-choice">Choix multiple</option>
                   <option value="ranking">Classement / Tri</option>
                   <option value="pairing">Association de couples</option>
+                  <option value="categorization">Catégorisation (2 catégories)</option>
                 </select>
                 <input
                   type="text"
@@ -979,6 +1024,97 @@ export default function EditSurvey() {
                     )}
                   </div>
                 )}
+                {newQuestion.type === 'categorization' && (
+                  <div style={{ marginBottom: '15px' }}>
+                    <div style={{ marginBottom: '15px' }}>
+                      <label style={{ display: 'block', marginBottom: '10px', fontWeight: '600' }}>
+                        Nom de la première catégorie :
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Type A, Introverti, Matinal..."
+                        value={newQuestion.categoryA || 'Catégorie A'}
+                        onChange={(e) => setNewQuestion({ ...newQuestion, categoryA: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '10px',
+                          border: '2px solid #e0e0e0',
+                          borderRadius: '8px',
+                          fontSize: '14px'
+                        }}
+                      />
+                    </div>
+                    <div style={{ marginBottom: '15px' }}>
+                      <label style={{ display: 'block', marginBottom: '10px', fontWeight: '600' }}>
+                        Nom de la deuxième catégorie :
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Type B, Extraverti, Nocturne..."
+                        value={newQuestion.categoryB || 'Catégorie B'}
+                        onChange={(e) => setNewQuestion({ ...newQuestion, categoryB: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '10px',
+                          border: '2px solid #e0e0e0',
+                          borderRadius: '8px',
+                          fontSize: '14px'
+                        }}
+                      />
+                    </div>
+                    <label style={{ display: 'block', marginBottom: '10px', fontWeight: '600' }}>
+                      Personnes à classer (les participants devront classer chaque personne dans l&apos;une des deux catégories) :
+                    </label>
+                    {newQuestion.options.map((option, index) => {
+                      const opt = normalizeOption(option);
+                      return (
+                        <div key={index} style={{ marginBottom: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '5px' }}>
+                            <span style={{ width: '20px', textAlign: 'center', color: '#999' }}>{index + 1}.</span>
+                            <input
+                              type="text"
+                              placeholder={`Personne ${index + 1}`}
+                              value={opt.text}
+                              onChange={(e) => {
+                                const newOptions = [...newQuestion.options];
+                                const currentOpt = normalizeOption(newOptions[index]);
+                                newOptions[index] = { ...currentOpt, text: e.target.value };
+                                setNewQuestion({ ...newQuestion, options: newOptions });
+                              }}
+                              style={{
+                                flex: 1,
+                                padding: '10px',
+                                border: '2px solid #e0e0e0',
+                                borderRadius: '8px',
+                                fontSize: '14px'
+                              }}
+                            />
+                          </div>
+                          <div style={{ marginLeft: '30px', marginTop: '5px' }}>
+                            <input
+                              type="text"
+                              placeholder="Image (optionnel)"
+                              value={opt.image || ''}
+                              onChange={(e) => {
+                                const newOptions = [...newQuestion.options];
+                                const currentOpt = normalizeOption(newOptions[index]);
+                                newOptions[index] = { ...currentOpt, image: e.target.value || undefined };
+                                setNewQuestion({ ...newQuestion, options: newOptions });
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '8px',
+                                border: '1px solid #e0e0e0',
+                                borderRadius: '6px',
+                                fontSize: '12px'
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 {newQuestion.type === 'ranking' && (
                   <div style={{ marginBottom: '15px' }}>
                     <label style={{ display: 'block', marginBottom: '10px', fontWeight: '600' }}>
@@ -1134,6 +1270,8 @@ export default function EditSurvey() {
                         question: '',
                         options: ['', '', '', ''],
                         type: 'multiple-choice',
+                        categoryA: 'Catégorie A',
+                        categoryB: 'Catégorie B',
                       });
                       setRankingOrder([]);
                     }}
