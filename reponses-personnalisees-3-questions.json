@@ -86,6 +86,13 @@
       "question": "Qui s'aime le plus?",
       "optionsRef": "personnes",
       "type": "pairing"
+    },
+    {
+      "question": "Qui est le plus a droite ou gauche ?",
+      "optionsRef": "personnes",
+      "type": "categorization",
+      "categoryA": "Gauche",
+      "categoryB": "Droite"
     }
   ]
 }

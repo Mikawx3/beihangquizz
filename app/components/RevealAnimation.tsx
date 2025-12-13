@@ -25,7 +25,20 @@ const AVAILABLE_SOUNDS = [
   '/sounds/Dayun Jindu 3.mp3',
   '/sounds/Dayun Jindu 4.mp3',
   '/sounds/Kouweitang (Dayun Jindu Shop).mp3',
+  '/sounds/Nouvel enregistrement 4.mp3',
+  '/sounds/Nouvel enregistrement 4(1).mp3',
+  '/sounds/Nouvel enregistrement 5.mp3',
+  '/sounds/Nouvel enregistrement 6.mp3',
+  '/sounds/Nouvel enregistrement 7.mp3',
+  '/sounds/Nouvel enregistrement 8.mp3',
+  '/sounds/Nouvel enregistrement 9.mp3',
+  '/sounds/Nouvel enregistrement 10.mp3',
+  '/sounds/Nouvel enregistrement 11.mp3',
 ];
+
+// Historique des sons récemment joués (pour éviter la répétition)
+const RECENT_SOUNDS_HISTORY: string[] = [];
+const MAX_HISTORY_SIZE = 5; // Nombre de sons récents à retenir
 
 // Contexte audio global pour iOS - sera activé lors de la première interaction utilisateur
 let audioContextActivated = false;
@@ -66,11 +79,44 @@ const unlockAudioContext = async (): Promise<void> => {
 };
 
 // Fonction pour choisir aléatoirement un son parmi ceux disponibles
-// Utilise Math.random() pour une vraie randomisation à chaque appel
+// Réduit la probabilité des sons récemment joués
 const getRandomSound = (): string => {
-  const randomIndex = Math.floor(Math.random() * AVAILABLE_SOUNDS.length);
-  const selectedSound = AVAILABLE_SOUNDS[randomIndex];
-  console.log(`🎲 Sélection aléatoire: index ${randomIndex} -> ${selectedSound}`);
+  // Créer un tableau de poids pour chaque son
+  // Les sons récents ont un poids réduit (0.2 au lieu de 1.0)
+  const weights = AVAILABLE_SOUNDS.map(sound => {
+    const isRecent = RECENT_SOUNDS_HISTORY.includes(sound);
+    return isRecent ? 0.2 : 1.0;
+  });
+  
+  // Calculer la somme totale des poids
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  
+  // Générer un nombre aléatoire entre 0 et totalWeight
+  let random = Math.random() * totalWeight;
+  
+  // Sélectionner le son en fonction du poids
+  let selectedIndex = 0;
+  for (let i = 0; i < weights.length; i++) {
+    random -= weights[i];
+    if (random <= 0) {
+      selectedIndex = i;
+      break;
+    }
+  }
+  
+  const selectedSound = AVAILABLE_SOUNDS[selectedIndex];
+  
+  // Ajouter le son sélectionné à l'historique
+  RECENT_SOUNDS_HISTORY.push(selectedSound);
+  
+  // Limiter la taille de l'historique
+  if (RECENT_SOUNDS_HISTORY.length > MAX_HISTORY_SIZE) {
+    RECENT_SOUNDS_HISTORY.shift(); // Retirer le plus ancien
+  }
+  
+  const isRecent = RECENT_SOUNDS_HISTORY.length > 1 && RECENT_SOUNDS_HISTORY[RECENT_SOUNDS_HISTORY.length - 2] === selectedSound;
+  console.log(`🎲 Sélection aléatoire: index ${selectedIndex} -> ${selectedSound}${isRecent ? ' (réduit)' : ''}`);
+  
   return selectedSound;
 };
 
