@@ -530,6 +530,8 @@ export default function AdminPanel() {
                   const surveyId = session.surveyId || null;
                   const createdAt = session.createdAt?.toDate?.() || null;
                   const adminName = session.adminName || 'Non défini';
+                  const resultsMode = session.resultsMode || false;
+                  const isFinished = resultsMode || !isActive;
                   
                   return (
                     <div
@@ -560,6 +562,18 @@ export default function AdminPanel() {
                           }}>
                             {isActive ? '🟢 Active' : '⚪ Inactive'}
                           </span>
+                          {isFinished && (
+                            <span style={{
+                              padding: '4px 12px',
+                              borderRadius: '12px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              background: '#ff9800',
+                              color: 'white'
+                            }}>
+                              ✅ Terminée
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: '14px', color: '#666', marginBottom: '4px' }}>
                           <strong>Sondage:</strong> {surveyId ? (
@@ -584,7 +598,34 @@ export default function AdminPanel() {
                           </div>
                         )}
                       </div>
-                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        {isFinished && (
+                          <button
+                            onClick={() => {
+                              const resultsUrl = `/results/${session.id}`;
+                              // Copier le lien dans le presse-papiers
+                              navigator.clipboard.writeText(`${window.location.origin}${resultsUrl}`).then(() => {
+                                showAlert('Lien copié !', `Le lien vers les résultats a été copié dans le presse-papiers.\n\nLien: ${resultsUrl}\n\nVous pouvez partager ce lien avec n'importe qui.`);
+                              }).catch(() => {
+                                // Si la copie échoue, ouvrir directement
+                                window.open(resultsUrl, '_blank');
+                              });
+                            }}
+                            style={{
+                              padding: '8px 16px',
+                              background: '#4caf50',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              fontSize: '14px',
+                              fontWeight: '500'
+                            }}
+                            title="Cliquez pour copier le lien public vers les résultats"
+                          >
+                            📊 Voir/Partager résultats
+                          </button>
+                        )}
                         <button
                           onClick={() => router.push(`/admin/edit/${session.id}`)}
                           style={{
@@ -734,32 +775,59 @@ export default function AdminPanel() {
                 }
                 
                 try {
-                  // TOUJOURS nettoyer la session avant de créer/réutiliser (même si elle n'existe pas encore)
-                  // Cela garantit qu'il n'y a pas de données résiduelles
-                  console.log('🧹 Nettoyage préventif de la session:', sessionIdInput.trim());
-                  await cleanupSession(sessionIdInput.trim());
-                  
-                  // Créer une nouvelle session propre avec le sondage associé
-                  // Ne pas mettre adminName - il sera défini par le premier participant qui rejoint
                   const sessionRef = doc(db, 'sessions', sessionIdInput.trim());
-                  await setDoc(sessionRef, {
-                    surveyId: selectedSurveyId,
-                    currentQuestionIndex: -1,
-                    isActive: false,
-                    createdAt: new Date(),
-                    resultsMode: false,
-                    currentResultIndex: -1,
-                    questionTimerEndTime: null,
-                    // Pas d'adminName ici - sera défini par le premier participant qui rejoint
-                  });
+                  const sessionDoc = await getDoc(sessionRef);
+                  
+                  // Fonction pour créer ou mettre à jour la session
+                  const createOrUpdateSession = async () => {
+                    await setDoc(sessionRef, {
+                      surveyId: selectedSurveyId,
+                      currentQuestionIndex: -1,
+                      isActive: false,
+                      createdAt: sessionDoc.exists() ? sessionDoc.data()?.createdAt || new Date() : new Date(),
+                      resultsMode: false,
+                      currentResultIndex: -1,
+                      questionTimerEndTime: null,
+                      // Pas d'adminName ici - sera défini par le premier participant qui rejoint
+                    }, { merge: true });
 
-                  const selectedSurvey = surveys.find(s => s.id === selectedSurveyId);
-                  const surveyName = selectedSurvey?.name || selectedSurveyId;
-                  showAlert('Succès', `Sondage "${surveyName}" associé à la session "${sessionIdInput.trim()}" avec succès !\n\nLa première personne qui rejoindra cette session deviendra l'administrateur.`);
-                  setSelectedSurveyId('');
-                  setSessionIdInput('');
-                  // Recharger la liste des sessions
-                  await loadSessions();
+                    const selectedSurvey = surveys.find(s => s.id === selectedSurveyId);
+                    const surveyName = selectedSurvey?.name || selectedSurveyId;
+                    showAlert('Succès', `Sondage "${surveyName}" associé à la session "${sessionIdInput.trim()}" avec succès !\n\nLa première personne qui rejoindra cette session deviendra l'administrateur.`);
+                    setSelectedSurveyId('');
+                    setSessionIdInput('');
+                    await loadSessions();
+                  };
+                  
+                  // Vérifier si la session existe déjà et a des participants
+                  if (sessionDoc.exists()) {
+                    const participantsRef = collection(db, 'sessions', sessionIdInput.trim(), 'participants');
+                    const participantsSnapshot = await getDocs(participantsRef);
+                    
+                    if (participantsSnapshot.size > 0) {
+                      // Session existante avec participants - demander confirmation
+                      showConfirm(
+                        'Session existante avec participants',
+                        `La session "${sessionIdInput.trim()}" existe déjà et contient ${participantsSnapshot.size} participant(s).\n\nVoulez-vous vraiment supprimer tous les participants et réinitialiser cette session ?\n\n⚠️ Cette action est irréversible !`,
+                        async () => {
+                          try {
+                            await cleanupSession(sessionIdInput.trim());
+                            await createOrUpdateSession();
+                          } catch (error: any) {
+                            console.error('Erreur:', error);
+                            showAlert('Erreur', 'Erreur lors de l\'association: ' + (error?.message || 'Erreur inconnue'));
+                          }
+                        }
+                      );
+                      return;
+                    } else {
+                      // Session existe mais sans participants - nettoyer sans confirmation
+                      console.log('🧹 Nettoyage de la session existante (sans participants):', sessionIdInput.trim());
+                      await cleanupSession(sessionIdInput.trim());
+                    }
+                  }
+                  
+                  await createOrUpdateSession();
                 } catch (error: any) {
                   console.error('Erreur:', error);
                   showAlert('Erreur', 'Erreur lors de l\'association: ' + (error?.message || 'Erreur inconnue'));

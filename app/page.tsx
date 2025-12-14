@@ -500,6 +500,7 @@ export default function Home() {
           answers: {},
           score: 0,
           joinedAt: new Date(),
+          isActive: true, // Marquer comme actif lors de la création
         });
         
         // Vérifier que le participant a bien été ajouté
@@ -1916,18 +1917,38 @@ export default function Home() {
         }
       }
 
-      // Supprimer le participant de Firestore (seulement s'il n'a pas déjà été supprimé)
+      // Ne PAS supprimer le participant - marquer comme inactif pour conserver ses réponses
+      // Les réponses doivent être conservées même si le participant quitte, surtout si la session est terminée
       if (!participantAlreadyDeleted) {
-        console.log('🗑️ Suppression du participant:', name);
         try {
-          await deleteDoc(participantRef);
-          console.log('✅ Participant supprimé de Firestore');
+          // Vérifier si la session est terminée (resultsMode) ou si le participant a déjà répondu
+          const participantDoc = await getDoc(participantRef);
+          const hasAnswers = participantDoc.exists() && participantDoc.data()?.answers && 
+                            Object.keys(participantDoc.data().answers || {}).length > 0;
+          const sessionDoc = await getDoc(sessionRef);
+          const isSessionFinished = sessionDoc.exists() && (sessionDoc.data()?.resultsMode || !sessionDoc.data()?.isActive);
+          
+          if (hasAnswers || isSessionFinished) {
+            // Conserver le participant avec ses réponses - juste marquer comme inactif
+            console.log('💾 Conservation du participant et de ses réponses (session terminée ou réponses existantes):', name);
+            await updateDoc(participantRef, {
+              isActive: false,
+              leftAt: new Date(),
+            });
+            console.log('✅ Participant marqué comme inactif (réponses conservées)');
+          } else {
+            // Si le participant n'a pas répondu et la session est active, on peut le supprimer
+            console.log('🗑️ Suppression du participant sans réponses:', name);
+            await deleteDoc(participantRef);
+            console.log('✅ Participant supprimé de Firestore');
+          }
         } catch (deleteError: any) {
-          // Si le participant n'existe plus (déjà supprimé), ce n'est pas grave
+          // Si le participant n'existe plus, ce n'est pas grave
           if (deleteError?.code === 'not-found') {
             console.log('ℹ️ Participant déjà supprimé');
           } else {
-            throw deleteError;
+            console.warn('⚠️ Erreur lors de la mise à jour/suppression du participant:', deleteError);
+            // Ne pas bloquer la sortie en cas d'erreur
           }
         }
       } else {

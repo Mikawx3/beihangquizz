@@ -176,17 +176,49 @@ export default function EditQCM() {
   // Créer la session si elle n'existe pas
   const createSession = async () => {
     try {
-      // TOUJOURS nettoyer la session avant de créer/réutiliser (même si elle n'existe pas encore)
-      // Cela garantit qu'il n'y a pas de données résiduelles
-      console.log('🧹 Nettoyage préventif de la session:', sessionId);
-      await cleanupSession(sessionId);
+      const sessionRef = doc(db, 'sessions', sessionId);
+      const sessionDoc = await getDoc(sessionRef);
+      
+      // Vérifier si la session existe déjà et a des participants
+      if (sessionDoc.exists()) {
+        const participantsRef = collection(db, 'sessions', sessionId, 'participants');
+        const participantsSnapshot = await getDocs(participantsRef);
+        
+        if (participantsSnapshot.size > 0) {
+          // Session existante avec participants - demander confirmation
+          showConfirm(
+            'Session existante avec participants',
+            `La session "${sessionId}" existe déjà et contient ${participantsSnapshot.size} participant(s).\n\nVoulez-vous vraiment supprimer tous les participants et réinitialiser cette session ?\n\n⚠️ Cette action est irréversible !`,
+            async () => {
+              try {
+                await cleanupSession(sessionId);
+                await setDoc(sessionRef, {
+                  currentQuestionIndex: -1,
+                  isActive: false,
+                  createdAt: new Date(),
+                  hasQCM: true,
+                });
+                setSessionExists(true);
+                showAlert('Succès', 'Session créée avec succès !');
+              } catch (error) {
+                console.error('Erreur lors de la création de la session:', error);
+                showAlert('Erreur', 'Erreur lors de la création de la session');
+              }
+            }
+          );
+          return;
+        } else {
+          // Session existe mais sans participants - nettoyer sans confirmation
+          console.log('🧹 Nettoyage de la session existante (sans participants):', sessionId);
+          await cleanupSession(sessionId);
+        }
+      }
       
       // Créer une nouvelle session propre
-      const sessionRef = doc(db, 'sessions', sessionId);
       await setDoc(sessionRef, {
         currentQuestionIndex: -1,
         isActive: false,
-        createdAt: new Date(),
+        createdAt: sessionDoc.exists() ? sessionDoc.data()?.createdAt || new Date() : new Date(),
         hasQCM: true,
       });
       setSessionExists(true);
