@@ -171,8 +171,10 @@ export default function SessionResultsDetails() {
                 couples2.add(`${a},${b}`);
               }
             }
-            const intersection = new Set([...couples1].filter(x => couples2.has(x)));
-            const union = new Set([...couples1, ...couples2]);
+            const couples1Array = Array.from(couples1);
+            const couples2Array = Array.from(couples2);
+            const intersection = new Set(couples1Array.filter(x => couples2.has(x)));
+            const union = new Set([...couples1Array, ...couples2Array]);
             if (union.size > 0) {
               matches += intersection.size / union.size;
             }
@@ -407,7 +409,7 @@ export default function SessionResultsDetails() {
               fontWeight: '600'
             }}
           >
-            Retour à l'accueil
+            Retour à l&apos;accueil
           </button>
         </div>
       </div>
@@ -485,7 +487,7 @@ export default function SessionResultsDetails() {
                 fontWeight: '600'
               }}
             >
-              ← Vue d'ensemble
+              ← Vue d&apos;ensemble
             </button>
             <button
               onClick={() => router.push('/')}

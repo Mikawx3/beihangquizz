@@ -306,7 +306,7 @@ export default function SessionResults() {
               fontWeight: '600'
             }}
           >
-            Retour à l'accueil
+            Retour à l&apos;accueil
           </button>
         </div>
       </div>
@@ -397,7 +397,7 @@ export default function SessionResults() {
                 fontSize: '16px'
               }}
             >
-              ← Retour à l'accueil
+              ← Retour à l&apos;accueil
             </button>
           </div>
         </div>
