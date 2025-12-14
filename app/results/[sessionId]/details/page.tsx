@@ -843,6 +843,22 @@ export default function SessionResultsDetails() {
           </div>
         )}
       </div>
+
+      {/* Styles pour l'impression */}
+      <style jsx global>{`
+        @media print {
+          body {
+            background: white !important;
+          }
+          button {
+            display: none !important;
+          }
+          /* Afficher toutes les sections en mode impression */
+          div[style*="display: grid"] {
+            page-break-inside: avoid;
+          }
+        }
+      `}</style>
     </div>
   );
 }
