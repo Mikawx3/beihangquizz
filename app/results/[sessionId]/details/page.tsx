@@ -556,7 +556,12 @@ export default function SessionResultsDetails() {
                     borderTop: `1px solid ${isSelected ? 'rgba(255,255,255,0.3)' : '#e0e0e0'}`
                   }}>
                     💡 Plus proche de: <strong>{mostSimilar.participant.name || mostSimilar.participant.id}</strong><br />
-                    ({mostSimilar.similarity.toFixed(1)}% de similarité)
+                    ({mostSimilar.similarity.toFixed(1)}% de similarité - {
+                      mostSimilar.similarity > 70 ? 'Très similaire' : 
+                      mostSimilar.similarity > 50 ? 'Similaire' : 
+                      mostSimilar.similarity > 30 ? 'Peu similaire' : 
+                      'Très différent'
+                    })
                   </div>
                 )}
               </div>
@@ -723,10 +728,10 @@ export default function SessionResultsDetails() {
                   <div
                     key={participant.id}
                     style={{
-                      background: similarity > 70 ? '#e8f5e9' : similarity > 50 ? '#fff3e0' : '#fce4ec',
+                      background: similarity > 70 ? '#e8f5e9' : similarity > 50 ? '#fff3e0' : similarity > 30 ? '#e3f2fd' : '#fce4ec',
                       padding: '12px',
                       borderRadius: '8px',
-                      border: `2px solid ${similarity > 70 ? '#4caf50' : similarity > 50 ? '#ff9800' : '#e91e63'}`
+                      border: `2px solid ${similarity > 70 ? '#4caf50' : similarity > 50 ? '#ff9800' : similarity > 30 ? '#2196f3' : '#e91e63'}`
                     }}
                   >
                     <div style={{
@@ -739,7 +744,7 @@ export default function SessionResultsDetails() {
                     <div style={{
                       fontSize: '18px',
                       fontWeight: 'bold',
-                      color: similarity > 70 ? '#4caf50' : similarity > 50 ? '#ff9800' : '#e91e63'
+                      color: similarity > 70 ? '#4caf50' : similarity > 50 ? '#ff9800' : similarity > 30 ? '#2196f3' : '#e91e63'
                     }}>
                       {similarity.toFixed(1)}%
                     </div>
@@ -748,7 +753,7 @@ export default function SessionResultsDetails() {
                       color: '#666',
                       marginTop: '5px'
                     }}>
-                      {similarity > 70 ? 'Très similaire' : similarity > 50 ? 'Similaire' : 'Différent'}
+                      {similarity > 70 ? 'Très similaire' : similarity > 50 ? 'Similaire' : similarity > 30 ? 'Peu similaire' : 'Très différent'}
                     </div>
                   </div>
                 ))}
