@@ -52,6 +52,24 @@ export default function SessionResults() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [surveyName, setSurveyName] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Vérifier si l'utilisateur est admin
+  const checkAdminStatus = useCallback((sessionData: any) => {
+    if (typeof window === 'undefined') return false;
+    
+    // Vérifier si l'utilisateur est admin global
+    const isGlobalAdmin = localStorage.getItem('adminAuthenticated') === 'true';
+    if (isGlobalAdmin) {
+      return true;
+    }
+    
+    // Vérifier si l'utilisateur est l'admin de la session
+    const userName = localStorage.getItem('participantName') || '';
+    const isSessionAdmin = sessionData?.adminName && sessionData.adminName === userName;
+    
+    return isSessionAdmin;
+  }, []);
 
   // Charger les données de la session
   const loadSessionData = useCallback(async () => {
@@ -71,6 +89,10 @@ export default function SessionResults() {
       
       const sessionData: any = { id: sessionDoc.id, ...sessionDoc.data() };
       setSession(sessionData);
+      
+      // Vérifier le statut admin
+      const adminStatus = checkAdminStatus(sessionData);
+      setIsAdmin(adminStatus);
       
       // Charger les participants
       const participantsRef = collection(db, 'sessions', sessionId, 'participants');
@@ -319,14 +341,14 @@ export default function SessionResults() {
     <div style={{
       minHeight: '100vh',
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      padding: '20px'
+      padding: 'clamp(10px, 3vw, 20px)'
     }}>
       <div style={{
         maxWidth: '1200px',
         margin: '0 auto',
         background: 'white',
         borderRadius: '20px',
-        padding: '40px',
+        padding: 'clamp(20px, 5vw, 40px)',
         boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
       }}>
         {/* En-tête avec boutons d'action */}
@@ -339,12 +361,12 @@ export default function SessionResults() {
           gap: '15px'
         }}>
           <div>
-            <h1 style={{ color: '#333', margin: 0, fontSize: '28px' }}>📊 Résultats de la Session</h1>
-            <p style={{ color: '#666', marginTop: '5px', fontSize: '16px' }}>
+            <h1 style={{ color: '#333', margin: 0, fontSize: 'clamp(20px, 5vw, 28px)' }}>📊 Résultats de la Session</h1>
+            <p style={{ color: '#666', marginTop: '5px', fontSize: 'clamp(14px, 3vw, 16px)' }}>
               {sessionId} {surveyName && `- ${surveyName}`}
             </p>
             {createdAt && (
-              <p style={{ color: '#999', marginTop: '5px', fontSize: '14px' }}>
+              <p style={{ color: '#999', marginTop: '5px', fontSize: 'clamp(12px, 2.5vw, 14px)' }}>
                 Créée le: {createdAt.toLocaleDateString('fr-FR')} à {createdAt.toLocaleTimeString('fr-FR')}
               </p>
             )}
@@ -353,13 +375,13 @@ export default function SessionResults() {
             <button
               onClick={handlePrint}
               style={{
-                padding: '12px 24px',
+                padding: '10px 20px',
                 background: '#2196f3',
                 color: 'white',
                 border: 'none',
                 borderRadius: '10px',
                 cursor: 'pointer',
-                fontSize: '16px',
+                fontSize: 'clamp(14px, 3vw, 16px)',
                 fontWeight: '600',
                 display: 'flex',
                 alignItems: 'center',
@@ -368,33 +390,35 @@ export default function SessionResults() {
             >
               🖨️ Imprimer
             </button>
-            <button
-              onClick={() => router.push(`/results/${sessionId}/details`)}
-              style={{
-                padding: '12px 24px',
-                background: '#9c27b0',
-                color: 'white',
-                border: 'none',
-                borderRadius: '10px',
-                cursor: 'pointer',
-                fontSize: '16px',
-                fontWeight: '600',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              👥 Voir votes détaillés par personne
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => router.push(`/results/${sessionId}/details`)}
+                style={{
+                  padding: '10px 20px',
+                  background: '#9c27b0',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  fontSize: 'clamp(14px, 3vw, 16px)',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                👥 Voir votes détaillés par personne
+              </button>
+            )}
             <button
               onClick={() => router.push('/')}
               style={{
-                padding: '12px 24px',
+                padding: '10px 20px',
                 background: '#f5f5f5',
                 border: 'none',
                 borderRadius: '10px',
                 cursor: 'pointer',
-                fontSize: '16px'
+                fontSize: 'clamp(14px, 3vw, 16px)'
               }}
             >
               ← Retour à l&apos;accueil
@@ -405,33 +429,33 @@ export default function SessionResults() {
         {/* Statistiques générales */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))',
           gap: '15px',
           marginBottom: '30px'
         }}>
           <div style={{
             background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            padding: '20px',
+            padding: 'clamp(15px, 4vw, 20px)',
             borderRadius: '15px',
             color: 'white',
             textAlign: 'center'
           }}>
-            <div style={{ fontSize: '36px', fontWeight: 'bold', marginBottom: '5px' }}>
+            <div style={{ fontSize: 'clamp(28px, 7vw, 36px)', fontWeight: 'bold', marginBottom: '5px' }}>
               {participants.length}
             </div>
-            <div style={{ fontSize: '14px', opacity: 0.9 }}>Participants</div>
+            <div style={{ fontSize: 'clamp(12px, 3vw, 14px)', opacity: 0.9 }}>Participants</div>
           </div>
           <div style={{
             background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-            padding: '20px',
+            padding: 'clamp(15px, 4vw, 20px)',
             borderRadius: '15px',
             color: 'white',
             textAlign: 'center'
           }}>
-            <div style={{ fontSize: '36px', fontWeight: 'bold', marginBottom: '5px' }}>
+            <div style={{ fontSize: 'clamp(28px, 7vw, 36px)', fontWeight: 'bold', marginBottom: '5px' }}>
               {questions.length}
             </div>
-            <div style={{ fontSize: '14px', opacity: 0.9 }}>Questions</div>
+            <div style={{ fontSize: 'clamp(12px, 3vw, 14px)', opacity: 0.9 }}>Questions</div>
           </div>
         </div>
 
@@ -439,7 +463,7 @@ export default function SessionResults() {
         <div ref={exportRef} style={{ backgroundColor: 'white' }}>
           {/* Résultats par question - même contenu que la version admin */}
           <div style={{ marginTop: '30px' }}>
-            <h2 style={{ color: '#555', marginBottom: '20px', fontSize: '24px' }}>
+            <h2 style={{ color: '#555', marginBottom: '20px', fontSize: 'clamp(20px, 5vw, 24px)' }}>
               📈 Résultats détaillés par question
             </h2>
             
@@ -463,14 +487,14 @@ export default function SessionResults() {
                     <h3 style={{
                       color: '#333',
                       marginBottom: '15px',
-                      fontSize: '20px',
+                      fontSize: 'clamp(18px, 4.5vw, 20px)',
                       fontWeight: '600'
                     }}>
                       Question {index + 1}: {stats.question}
                     </h3>
                     
                     <div style={{
-                      fontSize: '14px',
+                      fontSize: 'clamp(12px, 3vw, 14px)',
                       color: '#666',
                       marginBottom: '20px',
                       padding: '10px',
@@ -503,12 +527,14 @@ export default function SessionResults() {
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
-                                marginBottom: '5px'
+                                marginBottom: '5px',
+                                flexWrap: 'wrap',
+                                gap: '5px'
                               }}>
-                                <span style={{ fontWeight: '600', fontSize: '16px' }}>
+                                <span style={{ fontWeight: '600', fontSize: 'clamp(14px, 3.5vw, 16px)' }}>
                                   {optIndex + 1}. {opt.text}
                                 </span>
-                                <span style={{ color: '#667eea', fontWeight: '600', fontSize: '16px' }}>
+                                <span style={{ color: '#667eea', fontWeight: '600', fontSize: 'clamp(14px, 3.5vw, 16px)' }}>
                                   {voteCount} vote{voteCount > 1 ? 's' : ''} ({percentage}%)
                                 </span>
                               </div>
@@ -558,12 +584,14 @@ export default function SessionResults() {
                                   <div style={{
                                     display: 'flex',
                                     justifyContent: 'space-between',
-                                    alignItems: 'center'
+                                    alignItems: 'center',
+                                    flexWrap: 'wrap',
+                                    gap: '5px'
                                   }}>
-                                    <span style={{ fontWeight: '600', fontSize: '16px' }}>
+                                    <span style={{ fontWeight: '600', fontSize: 'clamp(14px, 3.5vw, 16px)' }}>
                                       {optIndex + 1}. {opt.text}
                                     </span>
-                                    <span style={{ color: '#667eea', fontWeight: '600', fontSize: '16px' }}>
+                                    <span style={{ color: '#667eea', fontWeight: '600', fontSize: 'clamp(14px, 3.5vw, 16px)' }}>
                                       Position moyenne: {(avgPosition + 1).toFixed(2)} ({voteCount} vote{voteCount > 1 ? 's' : ''})
                                     </span>
                                   </div>
@@ -582,7 +610,7 @@ export default function SessionResults() {
                         {Object.keys(stats.coupleVotes).length > 0 ? (
                           <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(min(250px, 100%), 1fr))',
                             gap: '15px'
                           }}>
                             {Object.entries(stats.coupleVotes)
@@ -600,10 +628,10 @@ export default function SessionResults() {
                                     border: '1px solid #e0e0e0',
                                     textAlign: 'center'
                                   }}>
-                                    <div style={{ fontWeight: '600', fontSize: '16px', marginBottom: '5px' }}>
+                                    <div style={{ fontWeight: '600', fontSize: 'clamp(14px, 3.5vw, 16px)', marginBottom: '5px' }}>
                                       {opt1.text} ↔ {opt2.text}
                                     </div>
-                                    <div style={{ color: '#667eea', fontWeight: '600', fontSize: '18px' }}>
+                                    <div style={{ color: '#667eea', fontWeight: '600', fontSize: 'clamp(16px, 4vw, 18px)' }}>
                                       {voteCount} vote{voteCount > 1 ? 's' : ''}
                                     </div>
                                   </div>
@@ -671,7 +699,7 @@ export default function SessionResults() {
                                 borderRadius: '10px',
                                 border: '1px solid #e0e0e0'
                               }}>
-                                <div style={{ fontWeight: '600', fontSize: '16px', marginBottom: '10px' }}>
+                                <div style={{ fontWeight: '600', fontSize: 'clamp(14px, 3.5vw, 16px)', marginBottom: '10px' }}>
                                   {optIndex + 1}. {opt.text}
                                 </div>
                                 <div style={{
@@ -685,10 +713,10 @@ export default function SessionResults() {
                                     borderRadius: '8px',
                                     textAlign: 'center'
                                   }}>
-                                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4caf50' }}>
+                                    <div style={{ fontSize: 'clamp(20px, 5vw, 24px)', fontWeight: 'bold', color: '#4caf50' }}>
                                       {categoryACount}
                                     </div>
-                                    <div style={{ fontSize: '12px', color: '#666' }}>
+                                    <div style={{ fontSize: 'clamp(11px, 2.5vw, 12px)', color: '#666' }}>
                                       {total > 0 ? Math.round((categoryACount / total) * 100) : 0}%
                                     </div>
                                   </div>
@@ -698,10 +726,10 @@ export default function SessionResults() {
                                     borderRadius: '8px',
                                     textAlign: 'center'
                                   }}>
-                                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ff9800' }}>
+                                    <div style={{ fontSize: 'clamp(20px, 5vw, 24px)', fontWeight: 'bold', color: '#ff9800' }}>
                                       {categoryBCount}
                                     </div>
-                                    <div style={{ fontSize: '12px', color: '#666' }}>
+                                    <div style={{ fontSize: 'clamp(11px, 2.5vw, 12px)', color: '#666' }}>
                                       {total > 0 ? Math.round((categoryBCount / total) * 100) : 0}%
                                     </div>
                                   </div>

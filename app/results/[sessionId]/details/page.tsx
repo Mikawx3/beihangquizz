@@ -59,6 +59,24 @@ export default function SessionResultsDetails() {
   const [error, setError] = useState<string | null>(null);
   const [surveyName, setSurveyName] = useState('');
   const [selectedParticipant, setSelectedParticipant] = useState<string | null>(null);
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
+  // Vérifier si l'utilisateur est autorisé (admin)
+  const checkAdminAuth = useCallback((sessionData: any) => {
+    if (typeof window === 'undefined') return false;
+    
+    // Vérifier si l'utilisateur est admin global
+    const isGlobalAdmin = localStorage.getItem('adminAuthenticated') === 'true';
+    if (isGlobalAdmin) {
+      return true;
+    }
+    
+    // Vérifier si l'utilisateur est l'admin de la session
+    const userName = localStorage.getItem('participantName') || '';
+    const isSessionAdmin = sessionData?.adminName && sessionData.adminName === userName;
+    
+    return isSessionAdmin;
+  }, []);
 
   // Charger les données de la session
   const loadSessionData = useCallback(async () => {
@@ -72,11 +90,22 @@ export default function SessionResultsDetails() {
       if (!sessionDoc.exists()) {
         setError('Session non trouvée');
         setLoading(false);
+        setIsAuthorized(false);
         return;
       }
       
       const sessionData: any = { id: sessionDoc.id, ...sessionDoc.data() };
       setSession(sessionData);
+      
+      // Vérifier l'autorisation admin
+      const authorized = checkAdminAuth(sessionData);
+      setIsAuthorized(authorized);
+      
+      if (!authorized) {
+        setError('Accès refusé : Cette page est réservée aux administrateurs');
+        setLoading(false);
+        return;
+      }
       
       // Charger les participants
       const participantsRef = collection(db, 'sessions', sessionId, 'participants');
@@ -378,6 +407,7 @@ export default function SessionResultsDetails() {
   }
 
   if (error) {
+    const isAccessDenied = error.includes('Accès refusé');
     return (
       <div style={{
         minHeight: '100vh',
@@ -394,23 +424,42 @@ export default function SessionResultsDetails() {
           textAlign: 'center',
           maxWidth: '500px'
         }}>
-          <h2 style={{ color: '#f44336', marginBottom: '15px' }}>❌ Erreur</h2>
+          <h2 style={{ color: '#f44336', marginBottom: '15px', fontSize: '24px' }}>❌ {isAccessDenied ? 'Accès refusé' : 'Erreur'}</h2>
           <p style={{ fontSize: '16px', color: '#666', marginBottom: '20px' }}>{error}</p>
-          <button
-            onClick={() => router.push('/')}
-            style={{
-              padding: '12px 24px',
-              background: '#667eea',
-              color: 'white',
-              border: 'none',
-              borderRadius: '10px',
-              cursor: 'pointer',
-              fontSize: '16px',
-              fontWeight: '600'
-            }}
-          >
-            Retour à l&apos;accueil
-          </button>
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            {isAccessDenied && (
+              <button
+                onClick={() => router.push(`/results/${sessionId}`)}
+                style={{
+                  padding: '12px 24px',
+                  background: '#4caf50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  fontWeight: '600'
+                }}
+              >
+                Voir les résultats publics
+              </button>
+            )}
+            <button
+              onClick={() => router.push('/')}
+              style={{
+                padding: '12px 24px',
+                background: '#667eea',
+                color: 'white',
+                border: 'none',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: '600'
+              }}
+            >
+              Retour à l&apos;accueil
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -421,18 +470,23 @@ export default function SessionResultsDetails() {
     ? participants.find(p => p.id === selectedParticipant)
     : null;
 
+  // Vérifier l'autorisation avant d'afficher le contenu
+  if (isAuthorized === false && !loading) {
+    return null; // L'erreur sera affichée par le bloc error ci-dessus
+  }
+
   return (
     <div style={{
       minHeight: '100vh',
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      padding: '20px'
+      padding: 'clamp(10px, 3vw, 20px)'
     }}>
       <div style={{
         maxWidth: '1400px',
         margin: '0 auto',
         background: 'white',
         borderRadius: '20px',
-        padding: '40px',
+        padding: 'clamp(20px, 5vw, 40px)',
         boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
       }}>
         {/* En-tête */}
@@ -445,12 +499,12 @@ export default function SessionResultsDetails() {
           gap: '15px'
         }}>
           <div>
-            <h1 style={{ color: '#333', margin: 0, fontSize: '28px' }}>👥 Votes détaillés par personne</h1>
-            <p style={{ color: '#666', marginTop: '5px', fontSize: '16px' }}>
+            <h1 style={{ color: '#333', margin: 0, fontSize: 'clamp(20px, 5vw, 28px)' }}>👥 Votes détaillés par personne</h1>
+            <p style={{ color: '#666', marginTop: '5px', fontSize: 'clamp(14px, 3vw, 16px)' }}>
               {sessionId} {surveyName && `- ${surveyName}`}
             </p>
             {createdAt && (
-              <p style={{ color: '#999', marginTop: '5px', fontSize: '14px' }}>
+              <p style={{ color: '#999', marginTop: '5px', fontSize: 'clamp(12px, 2.5vw, 14px)' }}>
                 Créée le: {createdAt.toLocaleDateString('fr-FR')} à {createdAt.toLocaleTimeString('fr-FR')}
               </p>
             )}
@@ -459,13 +513,13 @@ export default function SessionResultsDetails() {
             <button
               onClick={() => window.print()}
               style={{
-                padding: '12px 24px',
+                padding: '10px 20px',
                 background: '#2196f3',
                 color: 'white',
                 border: 'none',
                 borderRadius: '10px',
                 cursor: 'pointer',
-                fontSize: '16px',
+                fontSize: 'clamp(14px, 3vw, 16px)',
                 fontWeight: '600',
                 display: 'flex',
                 alignItems: 'center',
@@ -477,13 +531,13 @@ export default function SessionResultsDetails() {
             <button
               onClick={() => router.push(`/results/${sessionId}`)}
               style={{
-                padding: '12px 24px',
+                padding: '10px 20px',
                 background: '#4caf50',
                 color: 'white',
                 border: 'none',
                 borderRadius: '10px',
                 cursor: 'pointer',
-                fontSize: '16px',
+                fontSize: 'clamp(14px, 3vw, 16px)',
                 fontWeight: '600'
               }}
             >
@@ -492,12 +546,12 @@ export default function SessionResultsDetails() {
             <button
               onClick={() => router.push('/')}
               style={{
-                padding: '12px 24px',
+                padding: '10px 20px',
                 background: '#f5f5f5',
                 border: 'none',
                 borderRadius: '10px',
                 cursor: 'pointer',
-                fontSize: '16px'
+                fontSize: 'clamp(14px, 3vw, 16px)'
               }}
             >
               Accueil
@@ -508,7 +562,7 @@ export default function SessionResultsDetails() {
         {/* Liste des participants */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(min(250px, 100%), 1fr))',
           gap: '15px',
           marginBottom: '30px'
         }}>
@@ -535,13 +589,13 @@ export default function SessionResultsDetails() {
               >
                 <h3 style={{
                   margin: '0 0 10px 0',
-                  fontSize: '18px',
+                  fontSize: 'clamp(16px, 4vw, 18px)',
                   fontWeight: '600'
                 }}>
                   {participant.name || participant.id}
                 </h3>
                 <div style={{
-                  fontSize: '14px',
+                  fontSize: 'clamp(12px, 3vw, 14px)',
                   opacity: 0.9,
                   marginBottom: '8px'
                 }}>
@@ -549,7 +603,7 @@ export default function SessionResultsDetails() {
                 </div>
                 {mostSimilar && (
                   <div style={{
-                    fontSize: '12px',
+                    fontSize: 'clamp(11px, 2.5vw, 12px)',
                     opacity: 0.8,
                     marginTop: '10px',
                     paddingTop: '10px',
@@ -573,14 +627,14 @@ export default function SessionResultsDetails() {
         {displayedParticipant && (
           <div style={{
             background: '#f9f9f9',
-            padding: '30px',
+            padding: 'clamp(20px, 5vw, 30px)',
             borderRadius: '15px',
             border: '2px solid #e0e0e0'
           }}>
             <h2 style={{
               color: '#333',
               marginBottom: '20px',
-              fontSize: '24px'
+              fontSize: 'clamp(20px, 5vw, 24px)'
             }}>
               Réponses de {displayedParticipant.name || displayedParticipant.id}
             </h2>
@@ -588,7 +642,7 @@ export default function SessionResultsDetails() {
             {/* Statistiques de préférences */}
             <div style={{
               background: 'white',
-              padding: '20px',
+              padding: 'clamp(15px, 4vw, 20px)',
               borderRadius: '10px',
               marginBottom: '30px',
               border: '1px solid #e0e0e0'
@@ -596,7 +650,7 @@ export default function SessionResultsDetails() {
               <h3 style={{
                 color: '#555',
                 marginBottom: '15px',
-                fontSize: '18px'
+                fontSize: 'clamp(16px, 4vw, 18px)'
               }}>
                 🎯 Réponses les plus choisies
               </h3>
@@ -617,7 +671,7 @@ export default function SessionResultsDetails() {
                     {topPrefs.length > 0 && (
                       <div style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(min(200px, 100%), 1fr))',
                         gap: '15px',
                         marginBottom: '20px'
                       }}>
@@ -634,25 +688,25 @@ export default function SessionResultsDetails() {
                             }}
                           >
                             {index === 0 && (
-                              <div style={{ fontSize: '24px', marginBottom: '5px' }}>👑</div>
+                              <div style={{ fontSize: 'clamp(20px, 5vw, 24px)', marginBottom: '5px' }}>👑</div>
                             )}
                             <div style={{
                               fontWeight: '600',
-                              fontSize: '14px',
+                              fontSize: 'clamp(12px, 3vw, 14px)',
                               marginBottom: '5px',
                               opacity: index === 0 ? 1 : 0.9
                             }}>
                               {pref.optionText}
                             </div>
                             <div style={{
-                              fontSize: '20px',
+                              fontSize: 'clamp(18px, 4.5vw, 20px)',
                               fontWeight: 'bold',
                               marginBottom: '3px'
                             }}>
                               {pref.count}x
                             </div>
                             <div style={{
-                              fontSize: '11px',
+                              fontSize: 'clamp(10px, 2.5vw, 11px)',
                               opacity: 0.8
                             }}>
                               {pref.questionType}
@@ -671,29 +725,29 @@ export default function SessionResultsDetails() {
                       }}>
                         <div style={{
                           background: '#e8f5e9',
-                          padding: '15px',
+                          padding: 'clamp(12px, 3vw, 15px)',
                           borderRadius: '10px',
                           textAlign: 'center',
                           border: '2px solid #4caf50'
                         }}>
-                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4caf50' }}>
+                          <div style={{ fontSize: 'clamp(20px, 5vw, 24px)', fontWeight: 'bold', color: '#4caf50' }}>
                             {categorizationPrefs.categoryA}x
                           </div>
-                          <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                          <div style={{ fontSize: 'clamp(11px, 2.5vw, 12px)', color: '#666', marginTop: '5px' }}>
                             Catégorie A
                           </div>
                         </div>
                         <div style={{
                           background: '#fff3e0',
-                          padding: '15px',
+                          padding: 'clamp(12px, 3vw, 15px)',
                           borderRadius: '10px',
                           textAlign: 'center',
                           border: '2px solid #ff9800'
                         }}>
-                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ff9800' }}>
+                          <div style={{ fontSize: 'clamp(20px, 5vw, 24px)', fontWeight: 'bold', color: '#ff9800' }}>
                             {categorizationPrefs.categoryB}x
                           </div>
-                          <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+                          <div style={{ fontSize: 'clamp(11px, 2.5vw, 12px)', color: '#666', marginTop: '5px' }}>
                             Catégorie B
                           </div>
                         </div>
@@ -707,7 +761,7 @@ export default function SessionResultsDetails() {
             {/* Statistiques de similarité */}
             <div style={{
               background: 'white',
-              padding: '20px',
+              padding: 'clamp(15px, 4vw, 20px)',
               borderRadius: '10px',
               marginBottom: '30px',
               border: '1px solid #e0e0e0'
@@ -715,13 +769,13 @@ export default function SessionResultsDetails() {
               <h3 style={{
                 color: '#555',
                 marginBottom: '15px',
-                fontSize: '18px'
+                fontSize: 'clamp(16px, 4vw, 18px)'
               }}>
                 📊 Comparaison avec les autres participants
               </h3>
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(min(200px, 100%), 1fr))',
                 gap: '10px'
               }}>
                 {getSimilarityStats(displayedParticipant).map(({ participant, similarity }) => (
@@ -736,20 +790,20 @@ export default function SessionResultsDetails() {
                   >
                     <div style={{
                       fontWeight: '600',
-                      fontSize: '14px',
+                      fontSize: 'clamp(12px, 3vw, 14px)',
                       marginBottom: '5px'
                     }}>
                       {participant.name || participant.id}
                     </div>
                     <div style={{
-                      fontSize: '18px',
+                      fontSize: 'clamp(16px, 4vw, 18px)',
                       fontWeight: 'bold',
                       color: similarity > 70 ? '#4caf50' : similarity > 50 ? '#ff9800' : similarity > 30 ? '#2196f3' : '#e91e63'
                     }}>
                       {similarity.toFixed(1)}%
                     </div>
                     <div style={{
-                      fontSize: '11px',
+                      fontSize: 'clamp(10px, 2.5vw, 11px)',
                       color: '#666',
                       marginTop: '5px'
                     }}>
@@ -765,7 +819,7 @@ export default function SessionResultsDetails() {
               <h3 style={{
                 color: '#555',
                 marginBottom: '20px',
-                fontSize: '18px'
+                fontSize: 'clamp(16px, 4vw, 18px)'
               }}>
                 📝 Détails des réponses
               </h3>
@@ -782,21 +836,21 @@ export default function SessionResultsDetails() {
                       key={questionIndex}
                       style={{
                         background: 'white',
-                        padding: '20px',
+                        padding: 'clamp(15px, 4vw, 20px)',
                         borderRadius: '10px',
                         border: '1px solid #e0e0e0'
                       }}
                     >
                       <div style={{
                         fontWeight: '600',
-                        fontSize: '16px',
+                        fontSize: 'clamp(14px, 3.5vw, 16px)',
                         marginBottom: '10px',
                         color: '#333'
                       }}>
                         Question {questionIndex + 1}: {question.question}
                       </div>
                       <div style={{
-                        fontSize: '14px',
+                        fontSize: 'clamp(12px, 3vw, 14px)',
                         color: '#666',
                         marginBottom: '10px',
                         padding: '8px',
@@ -813,7 +867,7 @@ export default function SessionResultsDetails() {
                       </div>
                       {answer !== null ? (
                         <div style={{
-                          fontSize: '15px',
+                          fontSize: 'clamp(13px, 3.5vw, 15px)',
                           color: '#333',
                           padding: '12px',
                           background: '#f5f5f5',
@@ -824,7 +878,7 @@ export default function SessionResultsDetails() {
                         </div>
                       ) : (
                         <div style={{
-                          fontSize: '14px',
+                          fontSize: 'clamp(12px, 3vw, 14px)',
                           color: '#999',
                           fontStyle: 'italic'
                         }}>
